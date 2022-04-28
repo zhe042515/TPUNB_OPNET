@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_source_pro_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624EA6C8 624EA6C8 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_source_pro_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269F4E5 6269F4E5 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -18,15 +18,20 @@ const char WSN_source_pro_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624EA6C
 
 #define		DATA_LEN			10
 #define		DATA_PERIOD			1*60*60
+#define		DATA_PERIOD_down	1*10*60
 #define		INTRPT_PORT			1
 #define		GATE_ADRESS			43690
-#define		NODENUMBER			7
+#define		NODENUMBER			200
+
+#define INTRPT_SELF_INIT				((op_intrpt_type() == OPC_INTRPT_SELF) && (op_intrpt_code() == intrCode_Init))
+#define intrCode_Init				10
 
 int	DATA_TYPE_BURST	= 4;
 
 extern int GateAddress;
 
 static void generate_pk();
+static void nwk_delay_start();
 
 /* End of Header Block */
 
@@ -101,9 +106,9 @@ static void generate_pk()
 	if(nodeType == 0)
 	{
 		type = 8;
-		//dest = op_dist_uniform (NODENUMBER) + 2;
+		dest = (int) op_dist_uniform (NODENUMBER - 1) + 1;
 		//dest = (int) (op_dist_uniform (50) + 1);
-		dest = 2;
+		//dest = 80;
 		//FOUT;
 	}
 	else
@@ -124,6 +129,15 @@ static void generate_pk()
 	FOUT;
 	
 }
+
+static void nwk_delay_start()
+{
+	FIN(nwk_delay_start());
+	//op_intrpt_schedule_self(op_sim_time() + op_dist_uniform(60*10),intrCode_Init);
+	op_intrpt_schedule_self(op_sim_time(),intrCode_Init);
+	FOUT;
+}
+
 
 /* End of Function Block */
 
@@ -181,8 +195,11 @@ WSN_source_pro (OP_SIM_CONTEXT_ARG_OPT)
 				//printf("Data nodeID = %d\n",nodeID);
 				op_ima_obj_attr_get(nodeID,"g_node_type",&nodeType);
 				op_ima_obj_attr_get(nodeID,"g_node_ESN_address",&myMACAddress);
-				op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD + op_dist_uniform (300), INTRPT_PORT);
+				
+				if(nodeType == 0)	op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD_down, INTRPT_PORT);
+				else op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD + op_dist_uniform (300), INTRPT_PORT);
 				//printf("Node %d source start!\n", myMACAddress);
+				
 				}
 				FSM_PROFILE_SECTION_OUT (state0_enter_exec)
 
@@ -191,7 +208,7 @@ WSN_source_pro (OP_SIM_CONTEXT_ARG_OPT)
 
 
 			/** state (init) transition processing **/
-			FSM_TRANSIT_FORCE (1, state1_enter_exec, ;, "default", "", "init", "make", "tr_0", "WSN_source_pro [init -> make : default / ]")
+			FSM_TRANSIT_FORCE (3, state3_enter_exec, nwk_delay_start();, "default", "nwk_delay_start()", "init", "delay", "tr_5", "WSN_source_pro [init -> delay : default / nwk_delay_start()]")
 				/*---------------------------------------------------------*/
 
 
@@ -229,6 +246,10 @@ WSN_source_pro (OP_SIM_CONTEXT_ARG_OPT)
 				{
 				//printf("data send a data to NWK!\n");
 				generate_pk();
+				
+				//if(op_dist_uniform(1) < 0.1) generate_pk();
+				
+				
 				}
 				FSM_PROFILE_SECTION_OUT (state2_enter_exec)
 
@@ -236,13 +257,46 @@ WSN_source_pro (OP_SIM_CONTEXT_ARG_OPT)
 			FSM_STATE_EXIT_FORCED (2, "data", "WSN_source_pro [data exit execs]")
 				FSM_PROFILE_SECTION_IN ("WSN_source_pro [data exit execs]", state2_exit_exec)
 				{
-				op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD + op_dist_uniform (60),INTRPT_PORT);
+				//op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD + op_dist_uniform (60),INTRPT_PORT);
+				
+				
+				if(nodeType == 0)	op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD_down, INTRPT_PORT);
+				else op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD + op_dist_uniform (60), INTRPT_PORT);
+				
+				//else op_intrpt_schedule_self(op_sim_time()+DATA_PERIOD, INTRPT_PORT); //泊松分布或离散均匀
 				}
 				FSM_PROFILE_SECTION_OUT (state2_exit_exec)
 
 
 			/** state (data) transition processing **/
 			FSM_TRANSIT_FORCE (1, state1_enter_exec, ;, "default", "", "data", "make", "tr_4", "WSN_source_pro [data -> make : default / ]")
+				/*---------------------------------------------------------*/
+
+
+
+			/** state (delay) enter executives **/
+			FSM_STATE_ENTER_UNFORCED (3, "delay", state3_enter_exec, "WSN_source_pro [delay enter execs]")
+
+			/** blocking after enter executives of unforced state. **/
+			FSM_EXIT (7,"WSN_source_pro")
+
+
+			/** state (delay) exit executives **/
+			FSM_STATE_EXIT_UNFORCED (3, "delay", "WSN_source_pro [delay exit execs]")
+
+
+			/** state (delay) transition processing **/
+			FSM_PROFILE_SECTION_IN ("WSN_source_pro [delay trans conditions]", state3_trans_conds)
+			FSM_INIT_COND (INTRPT_SELF_INIT)
+			FSM_DFLT_COND
+			FSM_TEST_LOGIC ("delay")
+			FSM_PROFILE_SECTION_OUT (state3_trans_conds)
+
+			FSM_TRANSIT_SWITCH
+				{
+				FSM_CASE_TRANSIT (0, 1, state1_enter_exec, ;, "INTRPT_SELF_INIT", "", "delay", "make", "tr_6", "WSN_source_pro [delay -> make : INTRPT_SELF_INIT / ]")
+				FSM_CASE_TRANSIT (1, 3, state3_enter_exec, ;, "default", "", "delay", "delay", "tr_7", "WSN_source_pro [delay -> delay : default / ]")
+				}
 				/*---------------------------------------------------------*/
 
 

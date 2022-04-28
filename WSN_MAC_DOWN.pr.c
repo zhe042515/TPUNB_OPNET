@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_MAC_DOWN_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A op_runsim 7 624E4EFE 624E4EFE 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                  ";
+const char WSN_MAC_DOWN_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6264BA6F 6264BA6F 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -36,10 +36,12 @@ const char WSN_MAC_DOWN_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A op_runsim 7 624E4EF
 #define		MaxBandWidth			658.0		//最大频段带宽
 #define		PointWidth				1			//频段带宽
 #define		Active_Time_Beacon		50			//信标帧保活时间，单位为帧(5s)
-#define		ACTIVE_TIME				5000000		//子节点保活时间
+#define		ACTIVE_TIME				2 * 60 * 30		//子节点保活时间
 #define		RETRANS_TIME			6			//重传等待时间
+#define		ACK_TIME				2			//创建的ACK等待时间
 #define		FATHER_NODE_NUM			6			//潜在父节点表数量
 #define		CHILDREN_NODE_NUM		20			//子节点表数量
+
 
 #define		MAX_SEQUENCE_NUM		6			//最大滑动窗格个数（0号值是第二个序列号的值）
 #define		MAX_RETRANS_NUM			5			//最大重传队列长度
@@ -262,7 +264,7 @@ static void 	create_associate_response_frame(int dest,int result);
 static void 	update_ack_time();
 static void 	update_retrans_time(int i);
 static void 	delete_keep_alive(int dest);
-static void 	delete_neighbor_node(int address);
+static void 	delete_neighbor_node(int address ,int dest_mode);
 static void 	send_msg_to_children();
 static void		create_ack(Packet* pk,int i,int n);
 static void 	mac_frame_proc(Packet* pk);
@@ -281,9 +283,20 @@ static void 	mac_leave();
 
 static void			make_ack_frame();
 static void			create_sub_ack(Packet* pk,int n);
+static void 		route_sink (Packet* pk);
 
 
 /** ----------------Globle Attribute------------- **/
+int globle_down_packet_number;
+int globle_down_receive_ack_number;
+long globle_down_route_cost; 
+long globle_down_link_cost; 
+long globle_down_net_cost;
+
+
+
+
+
 //extern	struct		NetworkMsg Network_Msg;
 extern struct NetworkMsg Network_Msg;
 
@@ -366,6 +379,25 @@ typedef struct
 	int	                    		g_mac_sending_flag                              ;
 	int	                    		g_mac_leaving                                   ;
 	int	                    		g_mac_receiving_flag                            ;	/* 发送状态标识符   1：正在发送，2：没有发送 */
+	Stathandle	             		pkt_success_stathandle                          ;	/* 节点本地统计丢包率 */
+	Stathandle	             		g_pkt_success_stathandle                        ;	/* 全网统计丢包率 */
+	Stathandle	             		route_cost_stathandle                           ;	/* 节点统计本地路由开销 */
+	Stathandle	             		g_route_cost_stathandle                         ;	/* 全网路由开销 */
+	Stathandle	             		link_cost_stathandle                            ;	/* 节点统计链路开销 */
+	Stathandle	             		g_link_cost_stathandle                          ;	/* 全网链路开销 */
+	Stathandle	             		net_cost_stathandle                             ;	/* 节点统计网络开销 */
+	Stathandle	             		g_net_cost_stathandle                           ;	/* 全网网络开销 */
+	Stathandle	             		all_cost_stathandle                             ;	/* 本节点所有包的总开销 */
+	Stathandle	             		g_all_cost_stathandle                           ;	/* 全网总开销 */
+	Stathandle	             		packet_number_stathandle                        ;	/* 本节点发送包的个数（需要ACK） */
+	Stathandle	             		g_packet_number_stathandle                      ;	/* 全网发送包的个数（需要ACK） */
+	int	                    		down_packet_number                              ;
+	int	                    		down_receive_ack_number                         ;
+	double	                 		down_route_cost                                 ;
+	double	                 		down_link_cost                                  ;
+	double	                 		down_net_cost                                   ;
+	Stathandle	             		down_success_rate                               ;
+	Stathandle	             		g_down_success_rate                             ;
 	} WSN_MAC_DOWN_state;
 
 #define subnet_objid            		op_sv_ptr->subnet_objid
@@ -416,6 +448,25 @@ typedef struct
 #define g_mac_sending_flag      		op_sv_ptr->g_mac_sending_flag
 #define g_mac_leaving           		op_sv_ptr->g_mac_leaving
 #define g_mac_receiving_flag    		op_sv_ptr->g_mac_receiving_flag
+#define pkt_success_stathandle  		op_sv_ptr->pkt_success_stathandle
+#define g_pkt_success_stathandle		op_sv_ptr->g_pkt_success_stathandle
+#define route_cost_stathandle   		op_sv_ptr->route_cost_stathandle
+#define g_route_cost_stathandle 		op_sv_ptr->g_route_cost_stathandle
+#define link_cost_stathandle    		op_sv_ptr->link_cost_stathandle
+#define g_link_cost_stathandle  		op_sv_ptr->g_link_cost_stathandle
+#define net_cost_stathandle     		op_sv_ptr->net_cost_stathandle
+#define g_net_cost_stathandle   		op_sv_ptr->g_net_cost_stathandle
+#define all_cost_stathandle     		op_sv_ptr->all_cost_stathandle
+#define g_all_cost_stathandle   		op_sv_ptr->g_all_cost_stathandle
+#define packet_number_stathandle		op_sv_ptr->packet_number_stathandle
+#define g_packet_number_stathandle		op_sv_ptr->g_packet_number_stathandle
+#define down_packet_number      		op_sv_ptr->down_packet_number
+#define down_receive_ack_number 		op_sv_ptr->down_receive_ack_number
+#define down_route_cost         		op_sv_ptr->down_route_cost
+#define down_link_cost          		op_sv_ptr->down_link_cost
+#define down_net_cost           		op_sv_ptr->down_net_cost
+#define down_success_rate       		op_sv_ptr->down_success_rate
+#define g_down_success_rate     		op_sv_ptr->g_down_success_rate
 
 /* These macro definitions will define a local variable called	*/
 /* "op_sv_ptr" in each function containing a FIN statement.	*/
@@ -601,18 +652,51 @@ static void MLME_LEAVE_CONFIRM(int result)
 static void cheak_mac_queue()
 	{
 	Boolean isEmpty_data;
-	Boolean isEmpty_retrans;
-	Boolean isEmpty_ack;
+	int nums;
+	int i;
+	int framecontrol;
+	int type;
+	int subtype;
+	Packet* pk;
+	Packet* copy;
 	FIN(cheak_mac_queue());
-	isEmpty_ack = op_subq_empty (ACK_Queue);
-	isEmpty_retrans = op_subq_empty (Retrans_Queue);
+	op_subq_flush(Retrans_Queue);
+	op_subq_flush(ACK_Queue);
 	isEmpty_data = op_subq_empty (Data_Queue);
-	if(isEmpty_data && isEmpty_retrans && isEmpty_ack)
+	if(!isEmpty_data)
+		{
+		if(g_mac_node_type == ROUTE_NODE)
+			{
+			nums = op_subq_stat (Data_Queue, OPC_QSTAT_PKSIZE);
+			for(i = 0;i<nums;i++)
+				{
+				pk = op_subq_pk_access (Data_Queue, i);
+				op_pk_fd_get(pk,0,&framecontrol);
+				type = (framecontrol>>13)&7;
+				if(type == 1)
+					{
+					op_pk_fd_get(pk,7,&subtype);
+					if(((subtype>>12)&15) == 2)
+						{
+						copy = op_pk_copy(pk);
+						op_subq_flush(Data_Queue);
+						op_subq_pk_insert(Data_Queue, copy, OPC_QPOS_TAIL);
+						break;
+						}
+					}		
+				}	
+			}
+		else if(g_mac_node_type == END_NODE||g_mac_node_type == BACKUP_NODE)
+			{
+			op_subq_flush(Data_Queue);
+			}	
+		}
+	isEmpty_data = op_subq_empty (Data_Queue);
+	if(isEmpty_data)
 		{
 		if(g_mac_node_status != OFFLINE) MLME_LEAVE_CONFIRM(2);//对下天线完成离网
 		op_intrpt_clear_self ();
 		op_strm_flush(IN_PHY_MAC);
-		//op_intrpt_disable (OPC_INTRPT_SELF, Intrpt_Slot_Down, OPC_TRUE) ;
 		mac_leave();
 		}
 	FOUT;
@@ -703,6 +787,10 @@ static void	make_beacon()
 	//printf("Node %d has sent a beacon at g_mac_slot_number%d at time%f!!!!!!!!!\n",g_mac_node_id,g_mac_slot_number,op_sim_time());
 	//op_prg_log_entry_write(g_mac_down_debug_log_handle, "Node %d has sent a beacon at g_mac_slot_number%d!\n",g_mac_node_id,g_mac_slot_number);
 	pk_size = op_pk_total_size_get(beacon);
+	
+	globle_down_link_cost = globle_down_link_cost+pk_size;
+	down_link_cost = down_link_cost+pk_size;
+	
 	g_mac_sending_time = pk_size/g_mac_data_rate;
 	op_pk_send_delayed (beacon, OUT_MAC_PHY,0.001);
 	op_intrpt_schedule_self(op_sim_time()+g_mac_sending_time, Send_Complete_Code);
@@ -756,6 +844,7 @@ static int get_sequence_to_node(int dest,int mode)
 		{
 		for(i = 0;i<CHILDREN_NODE_NUM ;i++)
 			{
+			if(g_mac_node_id == 0&&dest == 199) printf("neighbor_table[%d].node_address = %d\n",i,neighbor_table[i].node_address);
 			if(neighbor_table[i].node_address == next_hop(dest)||neighbor_table[i].node_address == dest)
 				{
 				neighbor_table[i].g_mac_seq = (neighbor_table[i].g_mac_seq+1)%256;
@@ -888,7 +977,8 @@ static int update_sequence_from_node(int source, int seq, int AR,int source_mode
 		diff = seq - neighbor_table[n].seq[0];
 		printf("Node %d receive a packet ,neighbor_table[%d].seq[0] = %d,seq = %d diff = %d\n",g_mac_node_id,n,neighbor_table[n].seq[0],seq,diff);
 		if(diff < -250) diff = seq+256-neighbor_table[n].seq[0];	//超过255
-		if(diff <= 0&&diff>(-5))									//已经接收过的帧
+		//if(diff <= 0&&diff>(-5))									//已经接收过的帧
+		if((diff <= 0&&diff>(-5))||diff>=250)
 			{
 			printf("Node %d receive an packet from down seq is old!!!\n",g_mac_node_id);
 			op_prg_log_entry_write(g_mac_down_debug_log_handle, "Node %d receive an packet from down seq is old!!!\n",g_mac_node_id);
@@ -906,7 +996,7 @@ static int update_sequence_from_node(int source, int seq, int AR,int source_mode
 				}
 			FRET(2);									//帧被接受过了
 			}
-		else if(diff>=6)											//异常帧序号
+		else if(diff>=6&&diff<250)											//异常帧序号
 			{
 			printf("Node %d receive an packet from down seq is over!!!\n",g_mac_node_id);
 			op_prg_log_entry_write(g_mac_down_info_log_handle, "Node %d receive an packet from down seq is over!!!\n",g_mac_node_id);
@@ -1048,23 +1138,34 @@ static void delete_keep_alive(int dest)
 /*删除邻接点表项对应条目*/
 /*********************************************/
 /*********************************************/
-static void delete_neighbor_node(int address)
+static void delete_neighbor_node(int address ,int dest_mode)
 	{
 	int i;
 	FIN(delete_neighbor_node(int address));
-	for(i = 0;i<CHILDREN_NODE_NUM ;i++)
+	if(dest_mode == SHORT_ADDRESS_MODE)
 		{
-		if(neighbor_table[i].node_address == address)
+		for(i = 0;i<CHILDREN_NODE_NUM ;i++)
 			{
-			neighbor_table[i].node_id = 0;
-			neighbor_table[i].band = 0;
-			neighbor_table[i].frequency = 0;
-			neighbor_table[i].seq[0] = 0;
-			neighbor_table[i].active_time = 0;
-			neighbor_table[i].g_mac_seq = 0;
-			break;
+			if(neighbor_table[i].node_address == address)
+				{
+				break;
+				}
 			}
 		}
+	else if(dest_mode == ESN_ADDRESS_MODE)
+		{
+		for(i = 0;i<CHILDREN_NODE_NUM ;i++)
+			{
+			if(neighbor_table[i].node_id == address)
+				break;
+			}
+		}
+	neighbor_table[i].node_id = 0;
+	neighbor_table[i].band = 0;
+	neighbor_table[i].frequency = 0;
+	neighbor_table[i].seq[0] = 0;
+	neighbor_table[i].active_time = 0;
+	neighbor_table[i].g_mac_seq = 0;	
 	FOUT;
 	}
 
@@ -1093,6 +1194,9 @@ static void send_msg_to_children()
 	int pk_size;
 	int framecontrol1;
 	int type1;
+	int dest_mode;
+//	int nwk_head;
+//	int subtype;
 	OpT_Packet_Id pk_id; 
 	double pk_create_time ;//原数据的创建时间
 	
@@ -1117,14 +1221,22 @@ static void send_msg_to_children()
 				op_pk_fd_get(pk,3,&dest);
 				op_pk_fd_get(pk,1,&seq);
 				type = (framecontrol>>13)&7;
+				dest_mode = (framecontrol>>4)&3;
 				if(type == MAC_CONTROL_FRAME)			//保活帧重传超过三次
 					{
 					op_pk_fd_get(pk,1,&seq);
 					op_pk_destroy(pk);
 					MLME_ALIVE_CONFIRM(next_hop(dest),1);			
-					//delete_keep_alive(dest);				//删除保活结构体条目
-			//		delete_keep_alive(next_hop(dest));
-			//		delete_neighbor_node(next_hop(dest));	//删除邻接点表条目
+					if(dest_mode == ESN_ADDRESS_MODE) 
+						{
+						delete_keep_alive(dest);				//删除保活结构体条目
+						delete_neighbor_node(dest,dest_mode);	//删除邻接点表条目		
+						}
+					else if(dest_mode == SHORT_ADDRESS_MODE) 
+						{
+						delete_keep_alive(next_hop(dest));		//删除保活结构体条目
+						delete_neighbor_node(next_hop(dest),dest_mode);	//删除邻接点表条目
+						}			
 					}
 				else									//其他帧发送失败就开始创建保活帧
 					{
@@ -1137,7 +1249,8 @@ static void send_msg_to_children()
 							FOUT;
 							}
 						}
-					create_actice_frame(next_hop(dest),seq);//创建保活帧	
+					if(dest_mode == SHORT_ADDRESS_MODE) create_actice_frame(next_hop(dest),seq);//创建保活帧	
+					else if(dest_mode == ESN_ADDRESS_MODE) create_actice_frame(dest,seq);
 					}
 				op_intrpt_schedule_self(op_sim_time(), Send_Complete_Code);
 				FOUT;
@@ -1150,10 +1263,26 @@ static void send_msg_to_children()
 			op_prg_log_entry_write(g_mac_down_debug_log_handle, "Node %d send a retrans packet at g_mac_slot_number%d !dest = %d,seq = %d\n",g_mac_node_id,g_mac_slot_number,dest,seq);
 			pk_create_time= op_pk_creation_time_get(pk);
 			copy = op_pk_copy(pk);
-			op_pk_creation_time_set(copy,pk_create_time);
+			op_pk_creation_time_set(copy,pk_create_time);			
 			op_pk_fd_get (pk, 0, &framecontrol) ;
+			type = (framecontrol>>13)&7;
 			pk_size = op_pk_total_size_get(pk);
 			sending_delay(pk_size);
+			
+			/*if(type == 1)
+				{
+				op_pk_fd_get (pk, 7, &nwk_head) ;
+				subtype = (nwk_head>>12)&15;
+				if(subtype == 0||subtype == 1||subtype == 2||subtype == 3||subtype == 4||subtype == 5)
+					{
+					globle_down_route_cost = globle_down_route_cost+pk_size;
+					down_route_cost = down_route_cost+pk_size;
+					} 
+				}*/
+			
+			route_sink( pk);
+			globle_down_link_cost = globle_down_link_cost+pk_size;
+			down_link_cost = down_link_cost+pk_size;
 			op_pk_send (pk, OUT_MAC_PHY);
 			update_retrans_time(1);
 			}
@@ -1183,8 +1312,13 @@ static void send_msg_to_children()
 				pk_size = op_pk_total_size_get(pk);
 				sending_delay(pk_size);
 				pk_id = op_pk_id(pk);
+				route_sink (pk);
 				op_pk_send(pk, OUT_MAC_PHY);
-				
+				if(type1 == 3)
+					{
+					globle_down_link_cost = globle_down_link_cost+pk_size;
+					down_link_cost = down_link_cost+pk_size;
+					}	
 				}	
 			else
 				{											//发送队列为空，本时隙没有帧需要发送
@@ -1195,6 +1329,8 @@ static void send_msg_to_children()
 		AR = (framecontrol>>10)&1;
 		if(AR == 1)
 			{
+			down_packet_number++;
+			globle_down_packet_number++;
 			if(count+1<5)
 				{
 				op_subq_pk_insert(Retrans_Queue,copy,OPC_QPOS_TAIL);
@@ -1267,7 +1403,7 @@ static void			create_sub_ack(Packet* pk,int n)
 	op_pk_fd_set(ack,0,OPC_FIELD_TYPE_INTEGER,source_mode,2);
 	op_pk_fd_set(ack,2,OPC_FIELD_TYPE_INTEGER,pk_seq,8);
 	op_pk_fd_set(ack,3,OPC_FIELD_TYPE_INTEGER,need_seq,8);
-		
+	printf("Node %d create sub_ack packet pk_seq is %d!!!\n",g_mac_node_id,pk_seq);
 	if (op_subq_pk_insert(ACK_Queue, ack, OPC_QPOS_TAIL) != OPC_QINS_OK)
 		{
 		printf("\n###Node %d:::data package from route insert into queue failed###\n", g_mac_node_id);
@@ -1276,7 +1412,7 @@ static void			create_sub_ack(Packet* pk,int n)
 	num_pkts = op_subq_stat (ACK_Queue, OPC_QSTAT_PKSIZE);
 	if(num_pkts <= MAX_ACK_NUM)
 		{
-		ack_time[num_pkts-1] = 2;
+		ack_time[num_pkts-1] = ACK_TIME;
 		}	
 	else
 		{
@@ -1297,6 +1433,8 @@ static void			make_ack_frame()
 	int framecontrol;
 	int pk_panid;
 	int i;
+	int ack_seq;
+	int ack_dest;
 	int pk_size;
 	int count;
 	FIN(make_ack_frame());
@@ -1326,6 +1464,9 @@ static void			make_ack_frame()
 			{
 			//printf("ack_num1 = %d\n",ack_nums);
 			sub_ack = op_subq_pk_remove (ACK_Queue, 0);
+			op_pk_fd_get(sub_ack,2,&ack_seq);
+			op_pk_fd_get(sub_ack,1,&ack_dest);
+			printf("ack_dest = %d;;;\t ack_seq = %d\n",ack_dest,ack_seq);
 			length = op_pk_total_size_get(sub_ack);
 			op_pk_fd_set(ack_frame,(11+i),OPC_FIELD_TYPE_PACKET,sub_ack,length);
 			update_ack_time();
@@ -1336,18 +1477,28 @@ static void			make_ack_frame()
 				pk_size = op_pk_total_size_get(ack_frame);
 				//printf("pk_size1 = %d\n",pk_size);
 				sending_delay(pk_size);
+				
+				globle_down_link_cost = globle_down_link_cost+pk_size;
+				down_link_cost = down_link_cost+pk_size;
+				
 				op_pk_send(ack_frame,OUT_MAC_PHY);
+				//printf("send1111\n");
 				FOUT;
 				}
 			i--;
 			}
 		else
 			{				
-			op_pk_fd_set(ack_frame,10,OPC_FIELD_TYPE_INTEGER,i,3);			
+			op_pk_fd_set(ack_frame,10,OPC_FIELD_TYPE_INTEGER,count,3);			
 			pk_size = op_pk_total_size_get(ack_frame);
-			//printf("pk_size2 = %d\n",pk_size);
+			//if(g_mac_node_id == 0) printf("pk_size2 = %d\n",pk_size);
 			sending_delay(pk_size);
+			
+			globle_down_link_cost = globle_down_link_cost+pk_size;
+			down_link_cost = down_link_cost+pk_size;
+			
 			op_pk_send(ack_frame,OUT_MAC_PHY);
+			//if(g_mac_node_id == 0) printf("send2222\n");
 			FOUT;
 			}
 		}
@@ -1508,7 +1659,7 @@ static void			create_ack(Packet* pk,int i,int n)
 		num_pkts = op_subq_stat (ACK_Queue, OPC_QSTAT_PKSIZE);
 		if(num_pkts<=MAX_ACK_NUM)
 			{
-			ack_time[num_pkts-1] = 2;
+			ack_time[num_pkts-1] = ACK_TIME;
 			}	
 		else
 			{
@@ -1672,6 +1823,7 @@ static void ack_proc(int seq ,int source ,int dest,int need_seq)
 	int 	number;
 	int 	data_source;		//待确认队列中帧的源节点
 	int		data_dest;			//待确认队列中帧的目的节点
+	int find_ack = 0;
 	FIN(ack_proc(int seq ,int source ,int dest, int need_seq));
 	number = op_subq_stat (Retrans_Queue, OPC_QSTAT_PKSIZE);
 		
@@ -1683,6 +1835,7 @@ static void ack_proc(int seq ,int source ,int dest,int need_seq)
 		op_pk_fd_get(packet,3,&data_dest);
 		if((ack == seq)&&(data_source == dest)&&(data_dest == source))
 			{
+			find_ack = 1;
 			packet = op_subq_pk_remove (Retrans_Queue, i);
 			//删除计数器****************************************
 			for(j = i;j < MAX_RETRANS_NUM-1;j++)
@@ -1692,44 +1845,45 @@ static void ack_proc(int seq ,int source ,int dest,int need_seq)
 				}
 			retrans[MAX_RETRANS_NUM-1].time = 100;
 			retrans[MAX_RETRANS_NUM-1].count = 0;
+			down_receive_ack_number++;
+			globle_down_receive_ack_number++;
 			printf("\tNODE %dfind the packet!!!,seq = %d\n",g_mac_node_id,seq);
 			op_prg_log_entry_write(g_mac_down_debug_log_handle,"Node %d find the packet!!!,seq = %d\n",g_mac_node_id,seq);
-			op_pk_destroy(packet);
+			//op_pk_destroy(packet);
 			i--;
 			number--;
-			continue;;
+			//continue;;
+			break;
 			}
+		}
+	if(find_ack == 1)
+		{
 		if(next_hop(data_dest)==next_hop(source)&&(ack-need_seq)<-250) ack = ack+256;
 		else if(next_hop(data_dest)==next_hop(source)&&(need_seq<5&&ack>250)) ack = ack-256;
-		if((ack<need_seq)&&(next_hop(source)==next_hop(data_dest)))
+		number = op_subq_stat (Retrans_Queue, OPC_QSTAT_PKSIZE);
+		for(i=0;i<number;i++)
 			{
-//			printf("ack<need_seq ,packet addr = %x\n",packet);
-			packet = op_subq_pk_remove (Retrans_Queue, i);
-			//删除计数器****************************************
-			for(j = i;j < MAX_RETRANS_NUM-1;j++)
+			packet = op_subq_pk_access (Retrans_Queue, i);
+			op_pk_fd_get(packet,1,&ack);
+			if(ack<need_seq)
 				{
-				retrans[j].time = retrans[j+1].time;
-				retrans[j].count = retrans[j+1].count;
-				}
-			retrans[MAX_RETRANS_NUM-1].time = 100;
-			retrans[MAX_RETRANS_NUM-1].count = 0;
-			op_pk_destroy(packet);
-			i--;
-			number--;
-			continue;
-			}
-		/*if((ack==need_seq)&&(next_hop(source)==next_hop(data_dest)))
-			{
-			printf("ack=need_seq ,i = %d,   packet addr = %x\n",i,packet);
-			op_subq_pk_swap (Retrans_Queue, 0, i);
-			cur_time = retrans[i].time;
-			cur_count = retrans[i].count;
-			retrans[i].time =  retrans[0].time;
-			retrans[i].count =  retrans[0].count;
-			retrans[0].time = cur_time;
-			retrans[0].count = cur_count;
-			continue;
-			}*/		
+				down_receive_ack_number++;
+				globle_down_receive_ack_number++;
+				packet = op_subq_pk_remove (Retrans_Queue, i);
+				//删除计数器****************************************
+				for(j = i;j < MAX_RETRANS_NUM-1;j++)
+					{
+					retrans[j].time = retrans[j+1].time;
+					retrans[j].count = retrans[j+1].count;
+					}
+				retrans[MAX_RETRANS_NUM-1].time = 100;
+				retrans[MAX_RETRANS_NUM-1].count = 0;
+				//op_pk_destroy(packet);
+				i--;
+				number--;
+				continue;
+				}		
+			}	
 		}
 	FOUT;
 	}
@@ -1888,9 +2042,34 @@ static void set_channel_start_receive ()
 	FIN(set_channel_start_receive());
 	op_strm_flush(IN_PHY_MAC);
 	g_mac_receiving_flag = RECEIVING;
+	//if(g_mac_node_id == 0) printf("send complete,start receive at %f\n",op_sim_time());
 	FOUT;
 	}
 
+
+static void route_sink (Packet* pk)
+	{
+	int framecontrol;
+	int type;
+	int subtype;
+	int nwk_head;
+	double pk_size;
+	FIN(route_sink(Packet* pk));
+	op_pk_fd_get (pk, 0, &framecontrol) ;
+	type = (framecontrol>>13)&7;
+	pk_size = op_pk_total_size_get(pk);	
+	if(type == DATA_FRAME)
+		{
+		op_pk_fd_get (pk, 7, &nwk_head) ;
+		subtype = (nwk_head>>12)&15;
+		if(subtype == 0||subtype == 1||subtype == 2||subtype == 3||subtype == 4||subtype == 6||subtype == 11||subtype == 12||subtype == 13||subtype == 14)
+			{
+			globle_down_route_cost = globle_down_route_cost+pk_size;
+			down_route_cost = down_route_cost+pk_size;
+			} 
+		}
+	FOUT;
+	}
 
 
 /* End of Function Block */
@@ -2006,8 +2185,26 @@ WSN_MAC_DOWN (OP_SIM_CONTEXT_ARG_OPT)
 					
 					}
 				
+				pkt_success_stathandle		=op_stat_reg ("Traffic Sink.down_pk_success",		OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				g_pkt_success_stathandle	=op_stat_reg ("Traffic Sink.down_g_pk_success",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
 				
+				route_cost_stathandle		=op_stat_reg ("Traffic Sink.down_route_cost",		OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				g_route_cost_stathandle		=op_stat_reg ("Traffic Sink.down_g_route_cost",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
 				
+				link_cost_stathandle		=op_stat_reg ("Traffic Sink.down_link_cost",		OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				g_link_cost_stathandle		=op_stat_reg ("Traffic Sink.down_g_link_cost",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				net_cost_stathandle			=op_stat_reg ("Traffic Sink.down_net_cost",			OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				g_net_cost_stathandle		=op_stat_reg ("Traffic Sink.down_g_net_cost",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				all_cost_stathandle			=op_stat_reg ("Traffic Sink.down_all_cost",			OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				g_all_cost_stathandle		=op_stat_reg ("Traffic Sink.down_g_all_cost",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				packet_number_stathandle	=op_stat_reg ("Traffic Sink.down_packet_number",	OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				g_packet_number_stathandle	=op_stat_reg ("Traffic Sink.down_g_packet_number",	OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				down_success_rate			=op_stat_reg ("Traffic Sink.down_success_rate",		OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				g_down_success_rate			=op_stat_reg ("Traffic Sink.down_g_success_rate",	OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
 				
 				
 				g_mac_down_info_log_handle = op_prg_log_handle_create(OpC_Log_Category_Configuration, "MAC_DOWN", "info", 1);
@@ -2120,24 +2317,25 @@ WSN_MAC_DOWN (OP_SIM_CONTEXT_ARG_OPT)
 					//seq = g_mac_sequence;
 					//g_mac_sequence = (g_mac_sequence+1)%256;
 					dest_mode = (framecontrol>>4)&3;
-					if(dest!=0xfffc&&dest!=0xfffd&&dest!=0xfffe&&dest!=0xffff) 
-						{
-						seq = get_sequence_to_node(dest,dest_mode);
-						}
-					else 		//广播帧和组播真的序列号为0
-						{
-						seq = 0;
-						}
-					op_pk_fd_set(pk,1,OPC_FIELD_TYPE_INTEGER,seq,8);
-					printf("Node %d MAC receive a frame from NWK dest is children node!  seq = %d  ;;;",g_mac_node_id,seq);
-					subtype = (nwk_head>>12)&15;
-					type = (framecontrol>>13)&7;
-					printf("type = %d  ;;;",type);
-					printf("subtype = %d  ;;;",subtype);
-					printf("dest = %d\n",dest);
+					printf("DEST == %d,dest_mode = %d,next_hop(dest) = %d\n",dest,dest_mode,next_hop(dest));	
 					pkt_num = op_subq_stat (Data_Queue, OPC_QSTAT_PKSIZE);
 					if(pkt_num <= 5)
 						{
+						if(dest!=0xfffc&&dest!=0xfffd&&dest!=0xfffe&&dest!=0xffff) 
+							{
+							seq = get_sequence_to_node(dest,dest_mode);
+							}
+						else 		//广播帧和组播真的序列号为0
+							{
+							seq = 0;
+							}
+						op_pk_fd_set(pk,1,OPC_FIELD_TYPE_INTEGER,seq,8);
+						printf("Node %d MAC receive a frame from NWK dest is children node!  seq = %d  ;;;",g_mac_node_id,seq);
+						subtype = (nwk_head>>12)&15;
+						type = (framecontrol>>13)&7;
+						printf("type = %d  ;;;",type);
+						printf("subtype = %d  ;;;",subtype);
+						printf("dest = %d\n",dest);	
 						if (op_subq_pk_insert(Data_Queue, pk, OPC_QPOS_TAIL) != OPC_QINS_OK)
 							{
 							printf("\n###Node %d:::data package from route insert into queue failed###\n", g_mac_node_id);
@@ -2151,6 +2349,8 @@ WSN_MAC_DOWN (OP_SIM_CONTEXT_ARG_OPT)
 						printf("Node %d Data_queue is full\n", g_mac_node_id);
 						}
 					}
+					
+					
 				}
 				FSM_PROFILE_SECTION_OUT (state2_enter_exec)
 
@@ -2336,9 +2536,26 @@ WSN_MAC_DOWN (OP_SIM_CONTEXT_ARG_OPT)
 				FSM_PROFILE_SECTION_IN ("WSN_MAC_DOWN [slot_intrpt enter execs]", state4_enter_exec)
 				{
 				int i;
+				double rate;
+				double g_rate;
+				
 				g_mac_sending_flag = 1;
 				if(C_SELF_NEW_SLOT)
 					{
+					op_stat_write (packet_number_stathandle, 		down_packet_number);
+					op_stat_write (pkt_success_stathandle, 			down_receive_ack_number);
+					op_stat_write (g_packet_number_stathandle, 		globle_down_packet_number);
+					op_stat_write (g_pkt_success_stathandle, 		globle_down_receive_ack_number);
+					rate = (double)down_receive_ack_number/(double)down_packet_number;
+					g_rate = (double)globle_down_receive_ack_number/(double)globle_down_packet_number;
+					op_stat_write (down_success_rate, 			rate);
+					op_stat_write (g_down_success_rate, 		g_rate);	
+					op_stat_write (link_cost_stathandle, 		down_link_cost);
+					op_stat_write (g_link_cost_stathandle, 		globle_down_link_cost);
+					op_stat_write (route_cost_stathandle, 		down_route_cost);
+					op_stat_write (g_route_cost_stathandle, 	globle_down_route_cost);
+					
+					
 					g_mac_slot_start_time = op_sim_time();
 					if(g_mac_node_id == 0)
 						{
@@ -2363,6 +2580,25 @@ WSN_MAC_DOWN (OP_SIM_CONTEXT_ARG_OPT)
 						if(g_mac_node_type == ROUTE_NODE) set_channel_down(g_mac_down_band,0);
 						if(g_mac_node_type == END_NODE || g_mac_node_type == BACKUP_NODE) set_channel_down(100,1);
 				
+						
+						for(i = 0;i<CHILDREN_NODE_NUM;i++)
+							{
+							if(neighbor_table[i].node_id != 0) 
+								{
+								neighbor_table[i].active_time--;
+								}
+							if(neighbor_table[i].active_time == 50)		//达到保活危险值
+								{
+								create_actice_frame(neighbor_table[i].node_address,-1);
+								neighbor_table[i].active_time = 49;
+								}
+							if(neighbor_table[i].active_time == 1)		//节点失活
+								{
+								MLME_ALIVE_CONFIRM(neighbor_table[i].node_address,1);
+								neighbor_table[i].active_time = -1;	
+								}
+							}
+								
 						for(i = 0;i < MAX_RETRANS_NUM;i++)
 							{
 							if(retrans[i].time<10)
@@ -2384,23 +2620,6 @@ WSN_MAC_DOWN (OP_SIM_CONTEXT_ARG_OPT)
 								make_beacon();
 							else 
 								op_intrpt_schedule_self(op_sim_time(), Send_Complete_Code);
-							for(i = 0;i<CHILDREN_NODE_NUM;i++)
-								{
-								if(neighbor_table[i].node_id != 0) 
-									{
-									neighbor_table[i].active_time--;
-									}
-								if(neighbor_table[i].active_time == 5)		//达到保活危险值
-									{
-									create_actice_frame(neighbor_table[i].node_address,-1);
-									neighbor_table[i].active_time = 4;
-									}
-								if(neighbor_table[i].active_time == 1)		//节点失活
-									{
-									MLME_ALIVE_CONFIRM(neighbor_table[i].node_address,1);
-									neighbor_table[i].active_time = -1;	
-									}
-								}
 							}
 						else if(g_mac_slot_number!=0 && g_mac_node_status == ONLINE && g_mac_node_type != END_NODE)
 							{
@@ -2624,6 +2843,25 @@ _op_WSN_MAC_DOWN_terminate (OP_SIM_CONTEXT_ARG_OPT)
 #undef g_mac_sending_flag
 #undef g_mac_leaving
 #undef g_mac_receiving_flag
+#undef pkt_success_stathandle
+#undef g_pkt_success_stathandle
+#undef route_cost_stathandle
+#undef g_route_cost_stathandle
+#undef link_cost_stathandle
+#undef g_link_cost_stathandle
+#undef net_cost_stathandle
+#undef g_net_cost_stathandle
+#undef all_cost_stathandle
+#undef g_all_cost_stathandle
+#undef packet_number_stathandle
+#undef g_packet_number_stathandle
+#undef down_packet_number
+#undef down_receive_ack_number
+#undef down_route_cost
+#undef down_link_cost
+#undef down_net_cost
+#undef down_success_rate
+#undef g_down_success_rate
 
 #undef FIN_PREAMBLE_DEC
 #undef FIN_PREAMBLE_CODE
@@ -2918,6 +3156,101 @@ _op_WSN_MAC_DOWN_svar (void * gen_ptr, const char * var_name, void ** var_p_ptr)
 	if (strcmp ("g_mac_receiving_flag" , var_name) == 0)
 		{
 		*var_p_ptr = (void *) (&prs_ptr->g_mac_receiving_flag);
+		FOUT
+		}
+	if (strcmp ("pkt_success_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->pkt_success_stathandle);
+		FOUT
+		}
+	if (strcmp ("g_pkt_success_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_pkt_success_stathandle);
+		FOUT
+		}
+	if (strcmp ("route_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->route_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("g_route_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_route_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("link_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->link_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("g_link_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_link_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("net_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->net_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("g_net_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_net_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("all_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->all_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("g_all_cost_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_all_cost_stathandle);
+		FOUT
+		}
+	if (strcmp ("packet_number_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->packet_number_stathandle);
+		FOUT
+		}
+	if (strcmp ("g_packet_number_stathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_packet_number_stathandle);
+		FOUT
+		}
+	if (strcmp ("down_packet_number" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->down_packet_number);
+		FOUT
+		}
+	if (strcmp ("down_receive_ack_number" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->down_receive_ack_number);
+		FOUT
+		}
+	if (strcmp ("down_route_cost" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->down_route_cost);
+		FOUT
+		}
+	if (strcmp ("down_link_cost" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->down_link_cost);
+		FOUT
+		}
+	if (strcmp ("down_net_cost" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->down_net_cost);
+		FOUT
+		}
+	if (strcmp ("down_success_rate" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->down_success_rate);
+		FOUT
+		}
+	if (strcmp ("g_down_success_rate" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_down_success_rate);
 		FOUT
 		}
 	*var_p_ptr = (void *)OPC_NIL;

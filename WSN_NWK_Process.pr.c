@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624E4D55 624E4D55 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 626767D1 626767D1 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -42,13 +42,13 @@ const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624E4D
 #define ROUTER_FREQ_NUM				1//路由节点使用的频点数
 
 //-----------------------------Timer Parameters Define-----------------------------------//
-#define NWK_TIMER_MAX_INIT						3600
+#define NWK_TIMER_MAX_INIT						60 * 59 * 2
 #define NWK_TIMER_UPDATE						5
 #define NWK_TIMER_RT							100
 #define NWK_COUNT_CT_STATUS						1
 #define NWK_COUNT_BACKUP						10
-#define NWK_COUNT_RT_ACTIVE						3*60
-#define NWK_COUNT_RT_TIMEOUT					10
+#define NWK_COUNT_RT_ACTIVE						4*60
+#define NWK_COUNT_RT_TIMEOUT					20
 #define NWK_TIMER_UPDATE_STATUS					20
 #define NWK_TIMER_JOIN							100
 
@@ -59,7 +59,7 @@ const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624E4D
 #define NWK_COUNT_ADDRESS_POOL					120 * 60 * 24
 #define NWK_COUNT_ADDRESS_POOL_OLD				120 * 60 * 24
 #define NWK_TIMER_MASTER_MONITOR				60
-#define NWK_TIMER_MUTICAST_MAINTAIN				60*3
+#define NWK_TIMER_MUTICAST_MAINTAIN				60*130
 
 //---------------------------------Stream Port Define------------------------------------//
 #define IN_DATA_TO_NWK					1
@@ -178,8 +178,7 @@ const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624E4D
 #define FAIL				1
 
 
-int onlineNodes[NWK_MAX_NODE_NUM];
-int onlineNodesNUmber;
+
 
 
 struct FatherTable{
@@ -294,10 +293,16 @@ int g_pk_send_down = 0;
 int g_pk_recv_down = 0;
 int g_pk_send_up = 0;
 int g_pk_recv_up = 0;
+int onlineNodes[NWK_MAX_NODE_NUM];
+int onlineNodesNUmber;
+int multicast_receive_num = 0;
+int leave_node_number = 0;
+
+int frequency_distr[] = {0, 0, 0, 0};
 
 
-
-static void pk_stat(Packet* pkptr);
+static void pk_stat_up(Packet* pkptr);
+static void pk_stat_down(Packet* pkptr);
 static void nwk_delay_start();
 static void nwk_init_RCtable();
 static void nwk_init_gate();
@@ -474,6 +479,17 @@ typedef struct
 	Stathandle	             		recv_send_rate                                  ;
 	Stathandle	             		ete_delay_l_n                                   ;
 	Stathandle	             		online_number_gstathandle                       ;	/* 节点入网数量统计量 */
+	Stathandle	             		recv_send_rate_down                             ;
+	Stathandle	             		ete_delay_gstathandle_down                      ;
+	Stathandle	             		multicast_count                                 ;
+	Stathandle	             		leave_node_count                                ;
+	int	                    		g_nwk_test_type                                 ;
+	double	                 		g_nwk_join_time                                 ;	/* 节点入网时间统计 */
+	Stathandle	             		join_time_lstathandle                           ;
+	Stathandle	             		send_up_num                                     ;	/* 上行数据的数据包数量统计 */
+	Stathandle	             		send_dowm_num                                   ;
+	Stathandle	             		recv_up_num                                     ;
+	Stathandle	             		recv_dowm_num                                   ;
 	} WSN_NWK_Process_state;
 
 #define g_nwk_result            		op_sv_ptr->g_nwk_result
@@ -526,6 +542,17 @@ typedef struct
 #define recv_send_rate          		op_sv_ptr->recv_send_rate
 #define ete_delay_l_n           		op_sv_ptr->ete_delay_l_n
 #define online_number_gstathandle		op_sv_ptr->online_number_gstathandle
+#define recv_send_rate_down     		op_sv_ptr->recv_send_rate_down
+#define ete_delay_gstathandle_down		op_sv_ptr->ete_delay_gstathandle_down
+#define multicast_count         		op_sv_ptr->multicast_count
+#define leave_node_count        		op_sv_ptr->leave_node_count
+#define g_nwk_test_type         		op_sv_ptr->g_nwk_test_type
+#define g_nwk_join_time         		op_sv_ptr->g_nwk_join_time
+#define join_time_lstathandle   		op_sv_ptr->join_time_lstathandle
+#define send_up_num             		op_sv_ptr->send_up_num
+#define send_dowm_num           		op_sv_ptr->send_dowm_num
+#define recv_up_num             		op_sv_ptr->recv_up_num
+#define recv_dowm_num           		op_sv_ptr->recv_dowm_num
 
 /* These macro definitions will define a local variable called	*/
 /* "op_sv_ptr" in each function containing a FIN statement.	*/
@@ -544,7 +571,7 @@ typedef struct
 enum { _op_block_origin = __LINE__ + 2};
 #endif
 
-static void pk_stat(Packet* pkptr)
+static void pk_stat_up(Packet* pkptr)
 {
 	double		pk_size;
 	double		ete_delay;
@@ -577,7 +604,33 @@ static void pk_stat(Packet* pkptr)
 	op_stat_write (pktssec_rcvd_gstathandle, 	1.0);
 	op_stat_write (pktssec_rcvd_gstathandle, 	0.0);
 	
+	op_stat_write (recv_up_num, 	g_pk_recv_up);
+	
 	op_stat_write (recv_send_rate, 	((double)g_pk_recv_up)/((double)g_pk_send_up));
+	FOUT;
+}
+
+static void pk_stat_down(Packet* pkptr)
+{
+	double		pk_size;
+	double		ete_delay;
+	FIN(pk_stat(Packet* pkptr));
+	rcvd_pkts++;
+	
+	printf("+++++++recv %d%f\n",rcvd_pkts,op_sim_time());
+
+	/* Caclulate metrics to be updated.		*/
+	pk_size = (double) op_pk_total_size_get (pkptr);
+	ete_delay = op_sim_time () - op_pk_creation_time_get (pkptr);
+
+	/* Update local statistics.				*/
+	
+	op_stat_write (ete_delay_gstathandle_down, 		ete_delay);
+
+
+	op_stat_write (recv_dowm_num, 	g_pk_recv_down);
+	
+	op_stat_write (recv_send_rate_down, 	((double)g_pk_recv_down)/((double)g_pk_send_down));
 	FOUT;
 }
 
@@ -587,8 +640,8 @@ static void pk_stat(Packet* pkptr)
 static void nwk_delay_start()
 {
 	FIN(nwk_delay_start());
-	//op_intrpt_schedule_self(op_sim_time() + op_dist_uniform(NWK_TIMER_MAX_INIT),intrCode_Init);
-	op_intrpt_schedule_self(op_sim_time(), intrCode_Init);
+	if(g_nwk_test_type == 4) op_intrpt_schedule_self(op_sim_time() + NWK_TIMER_MAX_INIT,intrCode_Init);
+	else op_intrpt_schedule_self(op_sim_time(), intrCode_Init);
 	FOUT;
 }
 /*
@@ -683,7 +736,7 @@ static void nwk_scan_request(double delay)
 	op_pk_fd_set (mlme, 0, OPC_FIELD_TYPE_INTEGER, SCAN, len*8);
 	//op_pk_send_delayed(mlme, OUT_NWK_TO_MLME, (g_nwk_my_ESN_address-1) * 60);
 	op_pk_send_delayed(mlme, OUT_NWK_TO_MLME, delay);
-	printf("66666\n");
+	//printf("66666\n");
 	FOUT;
 	}
 
@@ -743,9 +796,18 @@ static void nwk_associate_request()
 	op_pk_fd_set (mlme, 3, OPC_FIELD_TYPE_INTEGER, g_nwk_father_table.Band, 8);
 	op_pk_fd_set (mlme, 4, OPC_FIELD_TYPE_INTEGER, g_nwk_father_table.Frequency, 8);
 	//op_pk_send(mlme, OUT_NWK_TO_MLME);
-	op_pk_send_delayed(mlme, OUT_NWK_TO_MLME, op_dist_uniform(NWK_MAX_CHILD_NUM) * 20);
-	printf("Node %d send a associate to MAC, father = %x, band = %x\n", g_nwk_my_ESN_address, g_nwk_father_table.NWKAddress, potentialParent.father[g_nwk_my_ESN_address].father[index].band);
-	////op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a associate to MAC, father = %x, band = %x\n", g_nwk_my_ESN_address, g_nwk_father_table.NWKAddress, potentialParent.father[g_nwk_my_ESN_address].father[index].band);
+	if(g_nwk_test_type == 4)
+		{
+		op_pk_send_delayed(mlme, OUT_NWK_TO_MLME, 0);
+		if(g_nwk_join_time == 0)	g_nwk_join_time = op_sim_time();
+		}
+	else 
+		{
+		op_pk_send_delayed(mlme, OUT_NWK_TO_MLME, op_dist_uniform(20) * 20);
+		if(g_nwk_join_time == 0)	g_nwk_join_time = op_sim_time();
+		}
+	printf("Node %d send a associate to MAC, father = %d, band = %d\n", g_nwk_my_ESN_address, g_nwk_father_table.NWKAddress, potentialParent.father[g_nwk_my_ESN_address].father[index].band);
+	////op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a associate to MAC, father = %d, band = %d\n", g_nwk_my_ESN_address, g_nwk_father_table.NWKAddress, potentialParent.father[g_nwk_my_ESN_address].father[index].band);
 	FOUT;
 	}
 /*
@@ -812,8 +874,8 @@ static void nwk_keep_alive(int shortAddress, int res)
 	Packet* pk;
 	int len, pklen;
 	FIN(nwk_keep_alive(int shortAddress, int res));
-	printf("shortAddress = %x,res = %x\n", shortAddress, res);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "shortAddress = %x,res = %x\n", shortAddress, res);
+	printf("shortAddress = %d,res = %d\n", shortAddress, res);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "shortAddress = %d,res = %d\n", shortAddress, res);
 	if(res == SUCCESSFUL && shortAddress != g_nwk_my_father_short_address)//保活成功，则表示目标节点路由丢失
 		{
 		//更新路由表状态
@@ -896,9 +958,16 @@ static void nwk_join_request()
 		}
 	pklen = FRAMCONTR_LEN + MACSEQ_LEN + PANID_LEN + NWKCONTR_LEN + SHORTADDR_LEN + LONGADDR_LEN + LENGTH_LEN;
 	pklen += len*8;
-	nwk_generate_packet(pklen,0,1,3,2,g_nwk_my_ESN_address,g_nwk_my_father_short_address,0,0,len,mcps,OUT_NWK_TO_MCPS_UP, 1 + op_dist_uniform(NWK_MAX_CHILD_NUM*0.5));
-	printf("Node %d send a joinSeq!type = %x father = %d!\n", g_nwk_my_ESN_address, g_nwk_join_type, g_nwk_my_father_short_address);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d send a joinSeq!type = %x!\n", g_nwk_my_ESN_address, g_nwk_join_type);
+	if(g_nwk_test_type == 4)
+		{
+		nwk_generate_packet(pklen,0,1,3,2,g_nwk_my_ESN_address,g_nwk_my_father_short_address,0,0,len,mcps,OUT_NWK_TO_MCPS_UP, 0);
+		}
+	else 
+		{
+		nwk_generate_packet(pklen,0,1,3,2,g_nwk_my_ESN_address,g_nwk_my_father_short_address,0,0,len,mcps,OUT_NWK_TO_MCPS_UP, 1 + op_dist_uniform(NWK_MAX_CHILD_NUM*0.5));
+		}
+	printf("Node %d send a joinSeq!type = %d father = %d!\n", g_nwk_my_ESN_address, g_nwk_join_type, g_nwk_my_father_short_address);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d send a joinSeq!type = %d!\n", g_nwk_my_ESN_address, g_nwk_join_type);
 	op_intrpt_schedule_self(op_sim_time() + NWK_TIMER_JOIN,intrCode_Join);
 	FOUT;
 	}
@@ -920,7 +989,7 @@ static void nwk_generate_packet(int pklen,int multicast,int ar,int sourceMode,in
 		NWKLen += (IES_LEN / 8);
 		pkptr = op_pk_create (0);
 		op_pk_fd_set (pkptr,6,OPC_FIELD_TYPE_INTEGER,g_nwk_mulcast_maintain,IES_LEN);
-		////op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d send a pk with g_nwk_mulcast_maintain = %x\n", g_nwk_my_ESN_address, g_nwk_mulcast_maintain);
+		////op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d send a pk with g_nwk_mulcast_maintain = %d\n", g_nwk_my_ESN_address, g_nwk_mulcast_maintain);
 		}
 	else	pkptr = op_pk_create (0);
 	frameControl |= sourceMode;
@@ -948,7 +1017,7 @@ static void nwk_generate_packet(int pklen,int multicast,int ar,int sourceMode,in
 	op_pk_fd_set (pkptr,8,OPC_FIELD_TYPE_PACKET,PayLoad,NWKLen*8);
 	id = op_pk_id(pkptr);
 	op_pk_send_delayed(pkptr,streamPort,delay);
-	////op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d send a pk to %x, len = %d, packet id = %d\n", g_nwk_my_ESN_address, dest, op_pk_total_size_get(pkptr), id);
+	////op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d send a pk to %d, len = %d, packet id = %d\n", g_nwk_my_ESN_address, dest, op_pk_total_size_get(pkptr), id);
 	FOUT;
 }
 /*
@@ -968,10 +1037,10 @@ static int nwk_get_nexthop(int dest)
 	if(router == g_nwk_my_short_address)
 		{
 		i = CTinclude(dest);
-		//printf("-----------i = %x\n", i);
+		//printf("-----------i = %d\n", i);
 		if(i >= 0 && Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].status == NWK_CHILD_TABLE_LEGITIMATE)
 			{
-			//printf("---------status = %x\n", Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].status);
+			//printf("---------status = %d\n", Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].status);
 			dest = Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].NWKAddress;
 			FRET(dest);
 			}
@@ -1134,7 +1203,7 @@ static void nwk_process_Join_request(Packet* payLoad, int destMode, int dest, in
 			}
 		else//网关节点处理非代理入网请求
 			{
-			//printf("deviceType = %x\n",deviceType);
+			//printf("deviceType = %d\n",deviceType);
 			
 			NWKAddress = nwk_distribute_address(deviceType, shortAddress, ESNAddress);//分配地址
 			if(NWKAddress == -1)
@@ -1143,9 +1212,10 @@ static void nwk_process_Join_request(Packet* payLoad, int destMode, int dest, in
 				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "NWKAddress distr failt!\n");
 				FOUT;
 				}
-			frequency = nwk_distribute_frequency(0);//分配频点
+			
 			if(deviceType == ROUTERNODE)
 				{
+				frequency = nwk_distribute_frequency(2);//分配频点
 				//The gateway node establishes a routing table for the directly connected router and sends a confirm
 				generateRT(NWKAddress,NWKAddress,0,0);
 				//Assign band
@@ -1163,6 +1233,7 @@ static void nwk_process_Join_request(Packet* payLoad, int destMode, int dest, in
 				}
 			else if(deviceType == ENDNODE)
 				{
+				frequency = nwk_distribute_frequency(0);//分配频点
 				control = 26;
 				control |= (g_nwk_join_type<<5);
 				pk = op_pk_create(0);//create a accessConfirm_payLoad
@@ -1194,7 +1265,7 @@ static void nwk_process_Join_request(Packet* payLoad, int destMode, int dest, in
 			////op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a accessConfirm!!!\n",g_nwk_my_ESN_address);
 			//Build the mapping table
 			nwk_update_mapping(ESNAddress, NWKAddress);
-			//printf("mapping[%x]= %x\n",ESNAddress-1,mapping[ESNAddress]);
+			//printf("mapping[%d]= %d\n",ESNAddress-1,mapping[ESNAddress]);
 			generateCT(ESNAddress,NWKAddress,l_nwk_capabilityInformation, NWK_CHILD_TABLE_LEGITIMATE);
 			}
 		}
@@ -1212,14 +1283,14 @@ static void nwk_process_Join_request(Packet* payLoad, int destMode, int dest, in
 		if(deviceType==ROUTERNODE)
 			{
 			nexthop = nwk_get_nexthop(source);
-			printf("------------nexthop = %x\n",nexthop);
-			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "------------nexthop = %x\n",nexthop);
+			printf("------------nexthop = %d\n",nexthop);
+			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "------------nexthop = %d\n",nexthop);
 			if(nexthop <= 0) FOUT;
 			//Assign band
 			band = nwk_distribute_band(NWKAddress);
 			if(band == -1)
 				{
-				printf("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+				printf("band = -1\n\n\n\n");
 				}
 			generateRT(NWKAddress,nexthop,0,0);//为新入网路由节点建立路由表
 			len = 12;
@@ -1236,8 +1307,8 @@ static void nwk_process_Join_request(Packet* payLoad, int destMode, int dest, in
 			nwk_update_mapping(ESNAddress, NWKAddress);
 			//mapping[ESNAddress].shortAddress = NWKAddress;//Build the mapping table
 			//mapping[ESNAddress].count = NWK_COUNT_MAPPING_TABLE;
-			printf("mapping[%x]= %x\n",ESNAddress,mapping[ESNAddress].shortAddress);
-			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "mapping[%x]= %x\n",ESNAddress,mapping[ESNAddress].shortAddress);
+			printf("mapping[%d]= %d\n",ESNAddress,mapping[ESNAddress].shortAddress);
+			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "mapping[%d]= %d\n",ESNAddress,mapping[ESNAddress].shortAddress);
 			}
 		else
 			{
@@ -1250,10 +1321,10 @@ static void nwk_process_Join_request(Packet* payLoad, int destMode, int dest, in
 			op_pk_fd_set(pk,1,OPC_FIELD_TYPE_INTEGER,ESNAddress,48);
 			op_pk_fd_set(pk,5,OPC_FIELD_TYPE_INTEGER,frequency,8);
 			//Build the mapping table
-			nwk_update_mapping(ESNAddress, NWKAddress);
+			nwk_update_mapping(ESNAddress, shortAddress);
 			//mapping[ESNAddress].shortAddress = shortAddress;
 			//mapping[ESNAddress].count = NWK_COUNT_MAPPING_TABLE;
-			printf("mapping[%x]= %x\n",ESNAddress,mapping[ESNAddress].shortAddress);
+			printf("mapping[%d]= %d\n",ESNAddress,mapping[ESNAddress].shortAddress);
 			}
 		pklen = FRAMCONTR_LEN + MACSEQ_LEN + PANID_LEN + NWKCONTR_LEN + SHORTADDR_LEN + LENGTH_LEN;
 		pklen += len*8;
@@ -1292,16 +1363,16 @@ static int nwk_process_access_confirm(Packet* payLoad, int destMode, int dest, i
 	FIN(nwk_process_access_confirm(Packet* payLoad, int destMode, int dest, int sourceMode, int source, int len));
 	
 	op_pk_fd_get(payLoad,0,&accessContr);
-	//printf("accessContr = %x\n", accessContr);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "accessContr = %x\n", accessContr);
+	//printf("accessContr = %d\n", accessContr);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "accessContr = %d\n", accessContr);
 	op_pk_fd_get(payLoad,5,&frequency);
 	permit = 1&(accessContr>>4);
 	join = 3&(accessContr>>5);
 	shortAddrComp = 1&(accessContr>>3);
 	bandComp = 1&(accessContr>>2);
 	frequencyComp = 1&(accessContr>>1);
-	//printf("Node %d receive a accessConfirm pk dest = %x\n",g_nwk_my_ESN_address,dest);
-	////op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d receive a accessConfirm pk dest = %x\n",g_nwk_my_ESN_address,dest);
+	//printf("Node %d receive a accessConfirm pk dest = %d\n",g_nwk_my_ESN_address,dest);
+	////op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d receive a accessConfirm pk dest = %d\n",g_nwk_my_ESN_address,dest);
 	if(permit == 1)
 	{
 		//代理入网确认
@@ -1325,13 +1396,13 @@ static int nwk_process_access_confirm(Packet* payLoad, int destMode, int dest, i
 				op_pk_fd_set(pk,4,OPC_FIELD_TYPE_INTEGER,band,8);
 				op_pk_fd_set(pk,5,OPC_FIELD_TYPE_INTEGER,frequency,8);
 				}
-			//printf("---------------------------NWKAddress = %x\n",NWKAddress);
-			//printf("------------------------------ENDNWKAddress = %x\n",NWKAddress);
+			//printf("---------------------------NWKAddress = %d\n",NWKAddress);
+			//printf("------------------------------ENDNWKAddress = %d\n",NWKAddress);
 			else//待入网节点是终端设备
 				{
 				NWKAddress = CTNWKAddresss(ESNAddress);
-				//printf("Node %d NWKAddress dist = %x\n", g_nwk_my_ESN_address, NWKAddress);
-				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d NWKAddress dist = %x\n", g_nwk_my_ESN_address, NWKAddress);
+				//printf("Node %d NWKAddress dist = %d\n", g_nwk_my_ESN_address, NWKAddress);
+				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d NWKAddress dist = %d\n", g_nwk_my_ESN_address, NWKAddress);
 				if(NWKAddress <= 0)
 					{
 					printf("Node %d NWKAddress dist error\n", g_nwk_my_ESN_address);
@@ -1348,8 +1419,8 @@ static int nwk_process_access_confirm(Packet* payLoad, int destMode, int dest, i
 			pklen = FRAMCONTR_LEN + MACSEQ_LEN + PANID_LEN + NWKCONTR_LEN + SHORTADDR_LEN + LONGADDR_LEN + LENGTH_LEN;
 			pklen += len*8;
 			nwk_generate_packet(pklen,0,1,2,3,g_nwk_my_short_address,ESNAddress,1,0,len,pk,OUT_NWK_TO_MCPS_DOWN,0);//发送非代理入网确认
-			printf("Node %d send a accessConfirm pk dest = %x\n",g_nwk_my_ESN_address,ESNAddress);
-			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a accessConfirm pk dest = %x\n",g_nwk_my_ESN_address,ESNAddress);
+			printf("Node %d send a accessConfirm pk dest = %d\n",g_nwk_my_ESN_address,ESNAddress);
+			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a accessConfirm pk dest = %d\n",g_nwk_my_ESN_address,ESNAddress);
 			//op_stat_write(contr_send_num,++sendNum);
 			UPCTStatus(ESNAddress,NWKAddress);
 			/*
@@ -1382,8 +1453,8 @@ static int nwk_process_access_confirm(Packet* payLoad, int destMode, int dest, i
 			printf("Node %d received a not agent access\n", g_nwk_my_ESN_address);
 			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d received a not agent access\n", g_nwk_my_ESN_address);
 			routerSeqComp = 1&accessContr;
-			//printf("Node %d shortAddrComp = %x\n", g_nwk_my_ESN_address, shortAddrComp);
-			////op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d shortAddrComp = %x\n", g_nwk_my_ESN_address, shortAddrComp);
+			//printf("Node %d shortAddrComp = %d\n", g_nwk_my_ESN_address, shortAddrComp);
+			////op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d shortAddrComp = %d\n", g_nwk_my_ESN_address, shortAddrComp);
 			if(shortAddrComp==1)	
 				{
 				op_pk_fd_get(payLoad,3,&NWKAddress);
@@ -1433,14 +1504,20 @@ static int nwk_process_access_confirm(Packet* payLoad, int destMode, int dest, i
 				onlineNodesNUmber += 1;
 				op_stat_write (online_number_gstathandle, 		onlineNodesNUmber);
 				}
+			if(g_nwk_test_type == 4) 
+				{
+				g_nwk_join_time = op_sim_time() - g_nwk_join_time;
+				op_stat_write(join_time_lstathandle, g_nwk_join_time);
+				}
+			
 			//printf("----------------\n");
 			if(g_nwk_node_type == ROUTERNODE)
 				{
-				printf("NodeBand = %x       ",g_nwk_myBand);
-				//op_prg_log_entry_write(g_nwk_info_log_handle, "NodeBand = %x       ",g_nwk_myBand);
+				printf("NodeBand = %d       ",g_nwk_myBand);
+				//op_prg_log_entry_write(g_nwk_info_log_handle, "NodeBand = %d       ",g_nwk_myBand);
 				}
-			printf("g_nwk_my_short_address = %x, g_nwk_my_frequency = %x\n",g_nwk_my_short_address, g_nwk_my_frequency);
-			//op_prg_log_entry_write(g_nwk_info_log_handle, "g_nwk_my_short_address = %x, g_nwk_my_frequency = %x\n",g_nwk_my_short_address, g_nwk_my_frequency);
+			printf("g_nwk_my_short_address = %d, g_nwk_my_frequency = %d\n",g_nwk_my_short_address, g_nwk_my_frequency);
+			//op_prg_log_entry_write(g_nwk_info_log_handle, "g_nwk_my_short_address = %d, g_nwk_my_frequency = %d\n",g_nwk_my_short_address, g_nwk_my_frequency);
 			
 			if(g_nwk_node_type == BACKUPNODE)		op_intrpt_schedule_self(op_sim_time() + 10 + op_dist_uniform (10),intrCode_ChangeMainRouter);//短暂等待后寻找主路由
 		}	
@@ -1476,8 +1553,8 @@ static void nwk_process_routing(Packet* payLoad, int destMode, int dest, int sou
 	FIN(nwk_process_routing(Packet* payLoad, int destMode, int dest, int sourceMode, int source, int len));
 	op_pk_fd_get(payLoad,0,&control);
 	op_pk_fd_get(payLoad,2,&shortAddress);
-	printf("Node %d receive a routing pk ,control = %x, shortAddress\n", g_nwk_my_ESN_address, control, shortAddress);
-	//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d receive a routing pk ,control = %x, shortAddress\n", g_nwk_my_ESN_address, control, shortAddress);
+	printf("Node %d receive a routing pk ,control = %d, shortAddress = %d\n", g_nwk_my_ESN_address, control, shortAddress);
+	//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d receive a routing pk ,control = %d, shortAddress\n", g_nwk_my_ESN_address, control, shortAddress);
 	if(control == 0)//路由回复的接收处理
 		{
 		UpdateRT(shortAddress, NWK_ROUTING_TABLE_Active);
@@ -1537,8 +1614,8 @@ static void nwk_process_routing(Packet* payLoad, int destMode, int dest, int sou
 				}
 			pklen += 8*len;
 			nwk_generate_packet(pklen, 0, 1, 2, model, g_nwk_my_short_address, source, 11, 0 , len, pk, OUT_NWK_TO_MCPS_UP, 0);//发送路由维护回复
-			printf("Node %d send a router response pk for router %x!, control = %x, model = %x\n", g_nwk_my_ESN_address, shortAddress, control, model);
-			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a router response pk for router %x!, control = %x, model = %x\n", g_nwk_my_ESN_address, shortAddress, control, model);
+			printf("Node %d send a router response pk for router %d!, control = %d, model = %d\n", g_nwk_my_ESN_address, shortAddress, control, model);
+			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a router response pk for router %d!, control = %d, model = %d\n", g_nwk_my_ESN_address, shortAddress, control, model);
 			}
 		}
 	FOUT;
@@ -1559,10 +1636,10 @@ static void nwk_process_multicast_control(Packet* payLoad, int destMode, int des
 	op_pk_fd_get(payLoad,0,&MulticastInformation);
 	type = 1&MulticastInformation;
 	number = 15&(MulticastInformation>>1);
-	printf("Node %d receive a MulticastContr to dest=%x!\n",g_nwk_my_ESN_address,dest);
-	//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d receive a MulticastContr to dest=%x!\n",g_nwk_my_ESN_address,dest);
-	printf("%x\n",MulticastInformation);	
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "%x\n",MulticastInformation);	
+	printf("Node %d receive a MulticastContr to dest=%d!\n",g_nwk_my_ESN_address,dest);
+	//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d receive a MulticastContr to dest=%d!\n",g_nwk_my_ESN_address,dest);
+	printf("%d\n",MulticastInformation);	
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "%d\n",MulticastInformation);	
 	for(i = 0;i<number;i++)
 	{
 		op_pk_fd_get(payLoad,i+1,&muticastID);
@@ -1570,19 +1647,19 @@ static void nwk_process_multicast_control(Packet* payLoad, int destMode, int des
 		{
 			if(type == 1)	g_nwk_my_multicast_table |= (1<<(muticastID - 1));
 			else			g_nwk_my_multicast_table &= (~(1<<(muticastID - 1)));
-			printf("Node %d add/subtract a muticastID = %x\n",g_nwk_my_ESN_address,muticastID);
-			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d add/subtract a muticastID = %x\n",g_nwk_my_ESN_address,muticastID);
+			printf("Node %d add/subtract a muticastID = %d\n",g_nwk_my_ESN_address,muticastID);
+			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d add/subtract a muticastID = %d\n",g_nwk_my_ESN_address,muticastID);
 		}
 		else if(g_nwk_node_type == ROUTERNODE)
 		{
 			if(type == 1)	g_nwk_children_multicast_table.group |= (1<<(muticastID - 1));
-			printf("Node %d add a muticastID = %x to ChildMT\n",g_nwk_my_ESN_address,muticastID);
-			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d add a muticastID = %x to ChildMT\n",g_nwk_my_ESN_address,muticastID);
+			printf("Node %d add a muticastID = %d to ChildMT\n",g_nwk_my_ESN_address,muticastID);
+			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d add a muticastID = %d to ChildMT\n",g_nwk_my_ESN_address,muticastID);
 		}
 	}
 	g_nwk_mulcast_maintain = (g_nwk_my_multicast_table | g_nwk_children_multicast_table.group);
-	printf("g_nwk_mulcast_maintain = %x\n", g_nwk_mulcast_maintain);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "g_nwk_mulcast_maintain = %x\n", g_nwk_mulcast_maintain);
+	printf("g_nwk_mulcast_maintain = %d\n", g_nwk_mulcast_maintain);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "g_nwk_mulcast_maintain = %d\n", g_nwk_mulcast_maintain);
 	/*
 	通过原语设置MAC的组播维护
 	*/
@@ -1631,8 +1708,8 @@ static void nwk_process_leave(Packet* payLoad, int destMode, int dest, int sourc
 		}
 	if(request == 1)
 		{
-		printf("removeChildren == %x && Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %x\n",removeChildren,Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
-		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "removeChildren == %x && Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %x\n",removeChildren,Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
+		printf("removeChildren == %d && Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %d\n",removeChildren,Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
+		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "removeChildren == %d && Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %d\n",removeChildren,Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
 		/*if(removeChildren == 1 && Network_Msg.NetworkCT[g_nwk_my_ESN_address].number > 0)
 			{
 			len = 1;
@@ -1701,8 +1778,8 @@ static void nwk_process_main_router_request(Packet* payLoad, int destMode, int d
 	Packet* pk;
 	FIN(nwk_process_main_router_request(Packet* payLoad, int destMode, int dest, int sourceMode, int source, int len));
 	op_pk_fd_get(payLoad,0,&type);
-	printf("mainRouterPro type = %x\n",type);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "mainRouterPro type = %x\n",type);
+	printf("mainRouterPro type = %d\n",type);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "mainRouterPro type = %d\n",type);
 	if(type == 1 && g_nwk_node_type == GATENODE)
 		{
 		op_pk_fd_get(payLoad,1,&ESNAddress);
@@ -1720,15 +1797,15 @@ static void nwk_process_main_router_request(Packet* payLoad, int destMode, int d
 		pklen = FRAMCONTR_LEN + MACSEQ_LEN + PANID_LEN + NWKCONTR_LEN + SHORTADDR_LEN + LENGTH_LEN;
 		pklen += 8*len;
 		nwk_generate_packet(pklen,0,1,1,2,g_nwk_my_short_address,source,12,NWK_MAX_RADIUS-1, len, pk, OUT_NWK_TO_MCPS_DOWN,0);//发送主路由信息回复
-		printf("Node %d received a mainRouterQuery query router %x's NWKAddress = %x\n",g_nwk_my_ESN_address,ESNAddress,NWKAddress);
-		//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d received a mainRouterQuery query router %x's NWKAddress = %x\n",g_nwk_my_ESN_address,ESNAddress,NWKAddress);
+		printf("Node %d received a mainRouterQuery query router %d's NWKAddress = %d\n",g_nwk_my_ESN_address,ESNAddress,NWKAddress);
+		//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d received a mainRouterQuery query router %d's NWKAddress = %d\n",g_nwk_my_ESN_address,ESNAddress,NWKAddress);
 		}
 	else if(type == 2 && g_nwk_node_type != GATENODE)
 		{
 		op_pk_fd_get(payLoad,1,&NWKAddress);
 		op_pk_fd_get(payLoad,2,&band);
-		printf("need rejoin!!!,fatherAddress = %x,band = %x\n",NWKAddress,band);
-		//op_prg_log_entry_write(g_nwk_info_log_handle, "need rejoin!!!,fatherAddress = %x,band = %x\n",NWKAddress,band);
+		printf("need rejoin!!!,fatherAddress = %d,band = %d\n",NWKAddress,band);
+		//op_prg_log_entry_write(g_nwk_info_log_handle, "need rejoin!!!,fatherAddress = %d,band = %d\n",NWKAddress,band);
 		g_nwk_main_routing_address = NWKAddress;
 		g_nwk_main_router_band = band;
 		if(g_nwk_main_routing_address == g_nwk_my_father_short_address)
@@ -1922,8 +1999,8 @@ static void nwk_process_backup_router_info(Packet* payLoad, int destMode, int de
 	type = (infoControl>>5)&3;
 	addOrReduce = (infoControl>>4)&1;
 	number = infoControl&0xf;
-	printf("mainRouterInfoPro,type = %x,number = %x,addOrReduce = %x\n",type,number,addOrReduce);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "mainRouterInfoPro,type = %x,number = %x,addOrReduce = %x\n",type,number,addOrReduce);
+	printf("mainRouterInfoPro,type = %d,number = %d,addOrReduce = %d\n",type,number,addOrReduce);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "mainRouterInfoPro,type = %d,number = %d,addOrReduce = %d\n",type,number,addOrReduce);
 	switch(type)
 	{
 		case 0: 	for(i = 0;i<number;i++)
@@ -1994,8 +2071,8 @@ static void nwk_process_backup_router_info(Packet* payLoad, int destMode, int de
 		case 3: 	op_pk_fd_get(payLoad,++index,&g_nwk_main_router_father);
 					op_pk_fd_get(payLoad,++index,&g_nwk_main_router_band);
 					op_pk_fd_get(payLoad,++index,&g_nwk_main_router_frequency);
-					printf("g_nwk_main_router_father = %x,g_nwk_main_router_band = %x,mainPoint = %x\n",g_nwk_main_router_father,g_nwk_main_router_band,g_nwk_main_router_frequency);
-					//op_prg_log_entry_write(g_nwk_info_log_handle, "g_nwk_main_router_father = %x,g_nwk_main_router_band = %x,mainPoint = %x\n",g_nwk_main_router_father,g_nwk_main_router_band,g_nwk_main_router_frequency);
+					printf("g_nwk_main_router_father = %d,g_nwk_main_router_band = %d,mainPoint = %d\n",g_nwk_main_router_father,g_nwk_main_router_band,g_nwk_main_router_frequency);
+					//op_prg_log_entry_write(g_nwk_info_log_handle, "g_nwk_main_router_father = %d,g_nwk_main_router_band = %d,mainPoint = %d\n",g_nwk_main_router_father,g_nwk_main_router_band,g_nwk_main_router_frequency);
 					break;
 	}
 	g_nwk_syn_seq++;
@@ -2041,8 +2118,8 @@ static void nwk_process_nwk_status(Packet* payLoad, int destMode, int dest, int 
 	FIN(nwkStatuspro(Packet* payLoad, int destMode, int dest, int sourceMode, int source, int len));
 	op_pk_fd_get(payLoad,0,&NWKAddress);
 	op_pk_fd_get(payLoad,1,&status);
-	printf("Node %d received a nwkStatus pk, shortAddress = %x , Status = %x!\n", g_nwk_my_ESN_address, NWKAddress, status);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d received a nwkStatus pk, shortAddress = %x , Status = %x!\n", g_nwk_my_ESN_address, NWKAddress, status);
+	printf("Node %d received a nwkStatus pk, shortAddress = %d , Status = %d!\n", g_nwk_my_ESN_address, NWKAddress, status);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d received a nwkStatus pk, shortAddress = %d , Status = %d!\n", g_nwk_my_ESN_address, NWKAddress, status);
 	FOUT;
 }
 
@@ -2092,7 +2169,7 @@ static void nwk_recover_node(Packet* payLoad, int destMode, int dest, int source
 static void nwk_process_up_data(Packet* payLoad, int destMode, int dest, int sourceMode, int source, int len)
 {
 	int data;
-	int ete_delay;
+	//int ete_delay;
 	FIN(nwk_process_up_data(Packet* payLoad, int destMode, int dest, int sourceMode, int source, int len));
 	op_pk_fd_get(payLoad,0,&data);
 	//op_pk_send(packet,1);
@@ -2101,16 +2178,16 @@ static void nwk_process_up_data(Packet* payLoad, int destMode, int dest, int sou
 	//op_stat_write(up_data_receive_num,++upReceiveNum);
 	//op_stat_write(up_pk_loss_rate,upReceiveNum/upSendNum);
 	g_pk_recv_up++;
-	pk_stat(payLoad);
-	if(source == 256)
-		{
-		printf("ssssssssssssssssssssssssssssssssss\n");
-		ete_delay = op_sim_time () - op_pk_creation_time_get (payLoad);
-		op_stat_write (ete_delay_l_n, 		ete_delay);
-		}
-	printf("----------------------------Node %d receive a up data = %x! g_pk_recv_up = %d  send = %d ----",g_nwk_my_ESN_address,data, g_pk_recv_up, g_pk_send_up);
+	pk_stat_up(payLoad);
+	//if(source == 256)
+		//{
+		//printf("ssssssssssssssssssssssssssssssssss\n");
+		//ete_delay = op_sim_time () - op_pk_creation_time_get (payLoad);
+		//op_stat_write (ete_delay_l_n, 		ete_delay);
+		//}
+	printf("----------------------------Node %d receive a up data = %d! g_pk_recv_up = %d  send = %d ----",g_nwk_my_ESN_address,data, g_pk_recv_up, g_pk_send_up);
 	//op_pk_send(payLoad, OUT_NWK_TO_SINK_UP);
-	//op_prg_log_entry_write(g_nwk_info_log_handle, "----------------------------Node %d receive a up data = %x!  g_pk_recv_up = %d  send = %d----len = %x-------------------\n",g_nwk_my_ESN_address,data, len, g_pk_recv_up, g_pk_send_up);
+	//op_prg_log_entry_write(g_nwk_info_log_handle, "----------------------------Node %d receive a up data = %d!  g_pk_recv_up = %d  send = %d----len = %d-------------------\n",g_nwk_my_ESN_address,data, len, g_pk_recv_up, g_pk_send_up);
 	FOUT;
 }
 
@@ -2126,11 +2203,15 @@ static void nwk_process_down_data(Packet* payLoad, int destMode, int dest, int s
 	//printf("-------------------------------------------------------------------------delay = %f-------------------\n",op_sim_time () - op_pk_creation_time_get (payLoad));
 	//op_stat_write(down_data_receive_num,++downReceiveNum);
 	//op_stat_write(down_pk_loss_rate,downReceiveNum/downSendNum);
-	printf("----------------------------Node %d receive a down data = %x!  ----",g_nwk_my_ESN_address,data);
+	printf("----------------------------Node %d receive a down data = %d!  ----",g_nwk_my_ESN_address,data);
 	//op_pk_send(payLoad, OUT_NWK_TO_SINK_DOWN);
+	if(dest < 17)//组播数据
+		{
+		FOUT;
+		}
 	g_pk_recv_down++;
-	
-	//op_prg_log_entry_write(g_nwk_info_log_handle, "----------------------------Node %d receive a down data = %x!  ----len = %x-------------------\n",g_nwk_my_ESN_address,data, len);
+	pk_stat_down(payLoad);
+	//op_prg_log_entry_write(g_nwk_info_log_handle, "----------------------------Node %d receive a down data = %d!  ----len = %d-------------------\n",g_nwk_my_ESN_address,data, len);
 	FOUT;
 }
 
@@ -2140,16 +2221,26 @@ static void nwk_process_down_data(Packet* payLoad, int destMode, int dest, int s
 static void generateCT(int ESNAddress,int NWKAddress,int l_nwk_capabilityInformation, int status)
 {
 	struct childrenTable T;
+	int i;
 	int len;
 	Packet* mlme;
 	FIN(gerenateCT(int ESNAddress,int NWKAddress,int l_nwk_capabilityInformation, int status) );
 	T.ESNAddress = ESNAddress;
-	printf("Node %d generateCT T.ESNAddress = %x\n",g_nwk_my_ESN_address,T.ESNAddress);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d generateCT T.ESNAddress = %x\n",g_nwk_my_ESN_address,T.ESNAddress);
+	printf("Node %d generateCT T.ESNAddress = %d\n",g_nwk_my_ESN_address,T.ESNAddress);
+	
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d generateCT T.ESNAddress = %d\n",g_nwk_my_ESN_address,T.ESNAddress);
 	T.NWKAddress = NWKAddress;
 	T.status = status;
 	T.CapabilityInformation = l_nwk_capabilityInformation;
 	T.JoinCount = NWK_PROXY_JOIN_TIMER;
+	for(i = 0;i<Network_Msg.NetworkCT[g_nwk_my_ESN_address].number;i++)
+	{
+		if(Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].ESNAddress == ESNAddress)
+		{
+			Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i] = T;
+			FOUT;
+		}
+	}
 	Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[Network_Msg.NetworkCT[g_nwk_my_ESN_address].number] = T;
 	Network_Msg.NetworkCT[g_nwk_my_ESN_address].number++;
 	len = 10;
@@ -2247,11 +2338,11 @@ static void generateRT(int destAddress,int nextHop,int status,int routerSeq)
 	FIN(gerenateRT(int destAddress,int nextHop,int status,int routerSeq));
 	destAddress &= (255<<8);
 	if(nextHop == 0 || destAddress == 0)	FOUT;
-	printf("Node %d generateRT destAddress = %x\n",g_nwk_my_ESN_address,destAddress);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d generateRT destAddress = %x\n",g_nwk_my_ESN_address,destAddress);
+	printf("Node %d generateRT destAddress = %d\n",g_nwk_my_ESN_address,destAddress);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d generateRT destAddress = %d\n",g_nwk_my_ESN_address,destAddress);
 	for(i = 0;i<g_nwk_routing_table.number;i++)
 	{
-		if(g_nwk_routing_table.table[i].destAddress == destAddress)
+		if(g_nwk_routing_table.table[i].destAddress == (destAddress>>8))
 		{
 			if(g_nwk_routing_table.table[i].routerSeq <= routerSeq || routerSeq == 0)
 			{
@@ -2264,6 +2355,7 @@ static void generateRT(int destAddress,int nextHop,int status,int routerSeq)
 					}
 				else g_nwk_routing_table.table[i].routerSeq = g_nwk_routing_table.table[i].routerSeq + 1;
 				g_nwk_routing_table.table[i].TimeoutCount = NWK_COUNT_RT_ACTIVE;
+				printf("--------------------------------------Node %d update a g_nwk_routing_table destAddress = %d,TimeoutCount = %d\n",g_nwk_my_ESN_address,g_nwk_routing_table.table[g_nwk_routing_table.number].destAddress,g_nwk_routing_table.table[g_nwk_routing_table.number].TimeoutCount);
 			}
 			FOUT;
 		}
@@ -2274,11 +2366,11 @@ static void generateRT(int destAddress,int nextHop,int status,int routerSeq)
 	T.routerSeq = routerSeq;
 	T.TimeoutCount = NWK_COUNT_RT_ACTIVE;
 	g_nwk_routing_table.table[g_nwk_routing_table.number] = T;
-	printf("--------------------------------------Node %d add a g_nwk_routing_table destAddress = %x,TimeoutCount = %x\n",g_nwk_my_ESN_address,g_nwk_routing_table.table[g_nwk_routing_table.number].destAddress,g_nwk_routing_table.table[g_nwk_routing_table.number].TimeoutCount);
-	//op_prg_log_entry_write(g_nwk_info_log_handle, "--------------------------------------Node %d add a g_nwk_routing_table destAddress = %x,TimeoutCount = %x\n",g_nwk_my_ESN_address,g_nwk_routing_table.table[g_nwk_routing_table.number].destAddress,g_nwk_routing_table.table[g_nwk_routing_table.number].TimeoutCount);
+	printf("--------------------------------------Node %d add a g_nwk_routing_table destAddress = %d,TimeoutCount = %d\n",g_nwk_my_ESN_address,g_nwk_routing_table.table[g_nwk_routing_table.number].destAddress,g_nwk_routing_table.table[g_nwk_routing_table.number].TimeoutCount);
+	//op_prg_log_entry_write(g_nwk_info_log_handle, "--------------------------------------Node %d add a g_nwk_routing_table destAddress = %d,TimeoutCount = %d\n",g_nwk_my_ESN_address,g_nwk_routing_table.table[g_nwk_routing_table.number].destAddress,g_nwk_routing_table.table[g_nwk_routing_table.number].TimeoutCount);
 	g_nwk_routing_table.number++;
 	Network_Msg.NetworkRT[g_nwk_my_ESN_address] = g_nwk_routing_table;
-	//printf("--------------------------------------Node %d add a g_nwk_routing_table destAddress = %x\n",g_nwk_my_ESN_address,Network_Msg.NetworkRT[g_nwk_my_ESN_address].table[Network_Msg.NetworkRT[g_nwk_my_ESN_address].number - 1].destAddress);
+	//printf("--------------------------------------Node %d add a g_nwk_routing_table destAddress = %d\n",g_nwk_my_ESN_address,Network_Msg.NetworkRT[g_nwk_my_ESN_address].table[Network_Msg.NetworkRT[g_nwk_my_ESN_address].number - 1].destAddress);
 	FOUT;
 }
 
@@ -2296,17 +2388,25 @@ static void UpdateRT(int NWKAddress, int status)
 	FIN(UpdateRT(int NWKAddress, int status));
 	if(NWKAddress > 0)//路由状态更新
 	{
-		//printf("Node %d UpdateRT NWKAddress = %x\n",g_nwk_my_ESN_address,NWKAddress);
+		//printf("Node %d UpdateRT NWKAddress = %d\n",g_nwk_my_ESN_address,NWKAddress);
+		//if((NWKAddress & 0x8000) > 0)
+		//{
+			//FOUT;
+		//}
 		if((NWKAddress & 0xff) > 0)//收到终端节点的上行数据,更新其代理路由节点的路由
 			{
 			NWKAddress &= 0xff00;
+			//if(NWKAddress == g_nwk_my_short_address)
+				//{
+				//FOUT;
+				//}
 			}
-		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d UpdateRT NWKAddress = %x\n",g_nwk_my_ESN_address,NWKAddress);
+		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d UpdateRT NWKAddress = %d\n",g_nwk_my_ESN_address,NWKAddress);
 		i = queryRTIndex(NWKAddress);
 		if(i >= 0)
 		{
-			printf("Node %d receive a data from %x ,updateRT,i = %x,g_nwk_routing_table.number = %x, status = %x\n",g_nwk_my_ESN_address,NWKAddress,i,g_nwk_routing_table.number, status);
-			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d receive a data from %x ,updateRT,i = %x,g_nwk_routing_table.number = %x, status = %x\n",g_nwk_my_ESN_address,NWKAddress,i,g_nwk_routing_table.number, status);
+			printf("Node %d receive a data from %d ,updateRT,i = %d,g_nwk_routing_table.number = %d, status = %d\n",g_nwk_my_ESN_address,NWKAddress,i,g_nwk_routing_table.number, status);
+			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d receive a data from %d ,updateRT,i = %d,g_nwk_routing_table.number = %d, status = %d\n",g_nwk_my_ESN_address,NWKAddress,i,g_nwk_routing_table.number, status);
 			g_nwk_routing_table.table[i].status = status;
 			if(status == NWK_ROUTING_TABLE_Active)
 				{
@@ -2331,8 +2431,8 @@ static void UpdateRT(int NWKAddress, int status)
 		}
 		else
 			{
-			printf("Node %d queryRTIndex error NWKAddress = %x\n", g_nwk_my_ESN_address, NWKAddress);
-			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d queryRTIndex error NWKAddress = %x\n", g_nwk_my_ESN_address, NWKAddress);
+			printf("Node %d queryRTIndex error NWKAddress = %d\n", g_nwk_my_ESN_address, NWKAddress);
+			//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d queryRTIndex error NWKAddress = %d\n", g_nwk_my_ESN_address, NWKAddress);
 			}
 	}
 	else//路由计数器更新
@@ -2345,12 +2445,12 @@ static void UpdateRT(int NWKAddress, int status)
 				}
 			if(g_nwk_routing_table.table[i].status == NWK_ROUTING_TABLE_DELETED)	
 				{
-				printf("Node %d g_nwk_routing_table %x status = NWK_ROUTING_TABLE_DELETED\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
-				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_routing_table %x status = NWK_ROUTING_TABLE_DELETED\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+				printf("Node %d g_nwk_routing_table %d status = NWK_ROUTING_TABLE_DELETED\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_routing_table %d status = NWK_ROUTING_TABLE_DELETED\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
 				continue;
 				}
 			--g_nwk_routing_table.table[i].TimeoutCount;
-			//printf("Node %d g_nwk_routing_table Node %d g_nwk_routing_table.table.TimeoutCount = %x\n",g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress, g_nwk_routing_table.table[i].TimeoutCount);
+			//printf("Node %d g_nwk_routing_table Node %d g_nwk_routing_table.table.TimeoutCount = %d\n",g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress, g_nwk_routing_table.table[i].TimeoutCount);
 			/*
 			if(g_nwk_routing_table.table[i].TimeoutCount == RT_TimeoutCount / 2 && g_nwk_routing_table.table[i].status == NWK_ROUTING_TABLE_TIMEOUT)
 				{
@@ -2370,8 +2470,8 @@ static void UpdateRT(int NWKAddress, int status)
 					}
 				pklen += 8*len;
 				nwk_generate_packet(pklen, 0, 1, 2, 2, g_nwk_my_short_address, (g_nwk_routing_table.table[i].nextHop<<8), 11, 0, len, pk, OUT_NWK_TO_MCPS_DOWN, 0);//发送主动路由维护请求
-				printf("Node %d send second router seq to %x!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
-				//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send second router seq to %x!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+				printf("Node %d send second router seq to %d!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+				//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send second router seq to %d!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
 				}
 			*/
 			if(g_nwk_routing_table.table[i].TimeoutCount <= 0)
@@ -2395,14 +2495,14 @@ static void UpdateRT(int NWKAddress, int status)
 						pklen += SHORTADDR_LEN;
 						}
 					pklen += 8*len;
-					nwk_generate_packet(pklen, 0, 1, 2, 2, g_nwk_my_short_address, (g_nwk_routing_table.table[i].nextHop<<8), 11, 0, len, pk, OUT_NWK_TO_MCPS_DOWN, 0);//发送主动路由维护请求
-					printf("Node %d send a router seq to %x!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
-					//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a router seq to %x!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+					nwk_generate_packet(pklen, 0, 1, 2, 2, g_nwk_my_short_address, (g_nwk_routing_table.table[i].nextHop<<8), 11, 0, len, pk, OUT_NWK_TO_MCPS_DOWN, op_dist_uniform(48*2));//发送主动路由维护请求
+					printf("Node %d send a router seq to %d!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+					//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a router seq to %d!\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
 					}
 				else if(g_nwk_routing_table.table[i].status == NWK_ROUTING_TABLE_TIMEOUT)
 					{
-					printf("Node %d g_nwk_routing_table %x status = deleted\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
-					//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d g_nwk_routing_table %x status = deleted\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+					printf("Node %d g_nwk_routing_table %d status = deleted\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
+					//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d g_nwk_routing_table %d status = deleted\n", g_nwk_my_ESN_address, g_nwk_routing_table.table[i].destAddress);
 					g_nwk_routing_table.table[i].status = NWK_ROUTING_TABLE_DELETED;
 					if(g_nwk_node_type == GATENODE)	continue;
 					len = 4;
@@ -2439,8 +2539,8 @@ static void deleteRouting(int routerSeq, int NWKAddress)
 					g_nwk_routing_table.table[i].TimeoutCount = 0;
 					}
 				Network_Msg.NetworkRT[g_nwk_my_ESN_address] = g_nwk_routing_table;
-				printf("Node %d delete router %x========\n", g_nwk_my_ESN_address, NWKAddress);
-				//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d delete router %x========\n", g_nwk_my_ESN_address, NWKAddress);
+				printf("Node %d delete router %d========\n", g_nwk_my_ESN_address, NWKAddress);
+				//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d delete router %d========\n", g_nwk_my_ESN_address, NWKAddress);
 				break;
 				}
 		}
@@ -2502,8 +2602,8 @@ static void UPCTStatus(int ESNAddress,int NWKAddress)
 	int deviceType;
 	Packet* mlme;
 	FIN(UPCTStatus(int ESNAddress,int NWKAddress));
-	printf("Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %x\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %x\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
+	printf("Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %d\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %d\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
 	for(i = 0;i < Network_Msg.NetworkCT[g_nwk_my_ESN_address].number;i++)
 	{
 		if(Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].ESNAddress == ESNAddress)
@@ -2535,8 +2635,8 @@ static void UPCTDeviceType(int NWKAddress)
 {
 	int i = 0;
 	FIN(UPCTDeviceType(int NWKAddress));
-	printf("Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %x\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %x\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
+	printf("Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %d\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %d\n",Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
 	for(i = 0;i < Network_Msg.NetworkCT[g_nwk_my_ESN_address].number;i++)
 	{
 		if(Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].NWKAddress == NWKAddress)
@@ -2586,7 +2686,7 @@ static int CTinclude(int NWKAddress)
 {
 	int i = 0;
 	FIN(CTinclude(int NWKAddress));
-	//printf("Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %x\n", Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
+	//printf("Network_Msg.NetworkCT[g_nwk_my_ESN_address].number = %d\n", Network_Msg.NetworkCT[g_nwk_my_ESN_address].number);
 	for(i = 0;i < Network_Msg.NetworkCT[g_nwk_my_ESN_address].number;i++)
 	{
 		if(Network_Msg.NetworkCT[g_nwk_my_ESN_address].table[i].NWKAddress == NWKAddress)	
@@ -2651,8 +2751,8 @@ static void maintainCMT(int multicastMain)
 	if(multicastMain >= 0)
 		{
 		g_nwk_children_multicast_table.maintain = (multicastMain | (g_nwk_children_multicast_table.maintain));
-		printf("Node %d received a multicast maintain = %x\n", g_nwk_my_ESN_address, multicastMain);
-		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d received a multicast maintain = %x\n", g_nwk_my_ESN_address, multicastMain);
+		printf("Node %d received a multicast maintain = %d\n", g_nwk_my_ESN_address, multicastMain);
+		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d received a multicast maintain = %d\n", g_nwk_my_ESN_address, multicastMain);
 		}
 	else
 		{
@@ -2787,14 +2887,14 @@ static int nwk_distribute_address(int deviceType, int shortAddress, int ESNAddre
 	{
 		//给路由节点分配地址
 		case ROUTERNODE: 
-				//printf("ESNAddress = %x mapping[ESNAddress].shortAddress = %x\n", ESNAddress, mapping[ESNAddress].shortAddress);
+				//printf("ESNAddress = %d mapping[ESNAddress].shortAddress = %d\n", ESNAddress, mapping[ESNAddress].shortAddress);
 				if(mapping[ESNAddress].shortAddress > 0)
 					{
 					FRET(mapping[ESNAddress].shortAddress);
 					}
 				for(i = 0;i < NWK_MAX_ROUTER_NUM;i++)//分配原先的地址
 				{
-					//printf("ESNAddress = %x\n", g_nwk_end_address_pool[i].ESNAddress);
+					//printf("ESNAddress = %d\n", g_nwk_end_address_pool[i].ESNAddress);
 					if(g_nwk_node_type == GATENODE && g_nwk_router_address_pool[i].ESNAddress == ESNAddress)
 					{
 						g_nwk_router_address_pool[i].ESNAddress = ESNAddress;
@@ -2903,8 +3003,8 @@ static void nwk_update_address(int NWKAddress)
 	if(g_nwk_node_type == ENDNODE)	FOUT;//终端设备不需要维护地址池
 	if(NWKAddress > 0)//地址状态更新
 	{
-		printf("Node %d UpdateAddress NWKAddress = %x\n",g_nwk_my_ESN_address,NWKAddress);
-		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d UpdateAddress NWKAddress = %x\n",g_nwk_my_ESN_address,NWKAddress);
+		printf("Node %d UpdateAddress NWKAddress = %d\n",g_nwk_my_ESN_address,NWKAddress);
+		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d UpdateAddress NWKAddress = %d\n",g_nwk_my_ESN_address,NWKAddress);
 		gateFlag = (NWKAddress>>15);
 		routerFlag = (NWKAddress>>8);
 		endFlag = (NWKAddress & ( ~(255 << 8) ) );
@@ -2941,10 +3041,10 @@ static void nwk_update_address(int NWKAddress)
 				else
 					{
 					g_nwk_router_address_pool[i].old = 0;
-					//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_router_address_pool[%x].old = 0\n", g_nwk_my_ESN_address, i);
+					//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_router_address_pool[%d].old = 0\n", g_nwk_my_ESN_address, i);
 					}
-				printf("Node %d g_nwk_router_address_pool[%x].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
-				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_router_address_pool[%x].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
+				printf("Node %d g_nwk_router_address_pool[%d].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
+				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_router_address_pool[%d].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
 				}
 			}
 		for(i = 0;i < NWK_MAX_NODE_NUM;i++)
@@ -2964,8 +3064,8 @@ static void nwk_update_address(int NWKAddress)
 					g_nwk_end_address_pool[i].old = 0;
 					}
 				
-				printf("Node %d g_nwk_end_address_pool[%x].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
-				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_end_address_pool[%x].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
+				printf("Node %d g_nwk_end_address_pool[%d].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
+				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_end_address_pool[%d].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
 				}
 			}
 		}
@@ -2988,8 +3088,8 @@ static void nwk_update_address(int NWKAddress)
 					{
 					g_nwk_end_address_pool[i].old = 0;
 					}
-				printf("Node %d g_nwk_end_address_pool[%x].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
-				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_end_address_pool[%x].ESNAddress = -1, Address %x released\n", g_nwk_my_ESN_address, i, i & g_nwk_my_short_address);
+				printf("Node %d g_nwk_end_address_pool[%d].ESNAddress = -1\n", g_nwk_my_ESN_address, i);
+				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d g_nwk_end_address_pool[%d].ESNAddress = -1, Address %d released\n", g_nwk_my_ESN_address, i, i & g_nwk_my_short_address);
 				}
 			}
 		}
@@ -2998,14 +3098,31 @@ static void nwk_update_address(int NWKAddress)
 
 /*
 	分配频点，采用随机分配
-	参数：0,一跳直连的终端；1,其它
+	参数：0,网关节点一跳直连的终端；1,其它
+		  2,网关节点一跳直连的路由
 */
 static int nwk_distribute_frequency(int type)
 {
+	int i = 0;
+	int min_fre_num = 1000;
+	int min_fre_index = 0;
 	FIN(nwk_distribute_frequency(int type));
 	if(g_nwk_node_type == GATENODE && type == 0)
 		{
 		FRET(op_dist_uniform (GATE_FREQNUM));
+		}
+	else if(type == 2) 
+		{
+		for(i = 0;i < 4;i++)
+			{
+			if(frequency_distr[i] < min_fre_num)
+				{
+				min_fre_num = frequency_distr[i];
+				min_fre_index = i;
+				}
+			}
+		frequency_distr[min_fre_index]++;
+		FRET(min_fre_index);
 		}
 	//if(deviceType == GATENODE)	FRET(op_dist_uniform (GATEFREQNUM));			
 	//if(deviceType == ROUTERNODE)	FRET(op_dist_uniform (FREQNUM));
@@ -3038,8 +3155,8 @@ static void nwk_update_mapping(int ESN_address, int NWK_address)
 	FIN(nwk_update_mapping(int ESN_address, int NWK_address));
 	mapping[ESN_address].shortAddress = NWK_address;
 	mapping[ESN_address].count = NWK_COUNT_MAPPING_TABLE;
-	printf("Node %d maping[%d].shortAddress = %x\n", g_nwk_my_ESN_address, ESN_address, NWK_address);
-	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d maping[%d].ESNAddress = %x\n", ESN_address, NWK_address);
+	printf("Node %d maping[%d].shortAddress = %d\n", g_nwk_my_ESN_address, ESN_address, NWK_address);
+	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "Node %d maping[%d].ESNAddress = %d\n", ESN_address, NWK_address);
 	FOUT;
 }
 
@@ -3098,16 +3215,16 @@ static void nwk_leave_net(int NWKAddress,int rejoin,int children,int assign)
 			EndIndex = (NWKAddress&255);
 			routerIndex = (NWKAddress>>8);
 		}
-		printf("EndIndex = %x,routerIndex = %x\n",EndIndex,routerIndex);
-		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "EndIndex = %x,routerIndex = %x\n",EndIndex,routerIndex);
+		printf("EndIndex = %d,routerIndex = %d\n",EndIndex,routerIndex);
+		//op_prg_log_entry_write(g_nwk_debugger_log_handle, "EndIndex = %d,routerIndex = %d\n",EndIndex,routerIndex);
 		ESNAddress = quiryNWKAddressFromMap(NWKAddress);
 		DeleteCT(2, NWKAddress);
 		if(EndIndex > 0)
 		{
 			if(g_nwk_node_type == GATENODE)
 			{
-				printf("ENDAddress = %x\n",mapping[ESNAddress].shortAddress);
-				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "ENDAddress = %x\n",mapping[ESNAddress].shortAddress);
+				printf("ENDAddress = %d\n",mapping[ESNAddress].shortAddress);
+				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "ENDAddress = %d\n",mapping[ESNAddress].shortAddress);
 				mapping[ESNAddress].shortAddress = 0;
 				mapping[ESNAddress].count = -1;
 			}
@@ -3121,8 +3238,8 @@ static void nwk_leave_net(int NWKAddress,int rejoin,int children,int assign)
 				//if(band>=0) bandTable[band] = 0;
 				mapping[ESNAddress].shortAddress = -1;
 				mapping[ESNAddress].count = -1;
-				printf("band = %x,ESNAddress = %x,router = %x\n",band,ESNAddress,g_nwk_router_address_pool[routerIndex - 1]);
-				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "band = %x,ESNAddress = %x,router = %x\n",band,ESNAddress,g_nwk_router_address_pool[routerIndex - 1]);
+				printf("band = %d,ESNAddress = %d,router = %d\n",band,ESNAddress,g_nwk_router_address_pool[routerIndex - 1]);
+				//op_prg_log_entry_write(g_nwk_debugger_log_handle, "band = %d,ESNAddress = %d,router = %d\n",band,ESNAddress,g_nwk_router_address_pool[routerIndex - 1]);
 				if(children == 1)
 				{
 					for(i = 0;i < NWK_MAX_NODE_NUM;i++)
@@ -3147,6 +3264,16 @@ static void nwk_leave_set()
 {
 	FIN(nwk_leave_set());
 	op_ima_obj_attr_set(g_nwk_nodeID,"g_node_status",0);
+	if(onlineNodes[g_nwk_my_ESN_address] == 1)
+		{
+		onlineNodes[g_nwk_my_ESN_address] = 0;
+		onlineNodesNUmber--;
+		op_stat_write (online_number_gstathandle, 		onlineNodesNUmber);
+		leave_node_number++;
+		op_stat_write (leave_node_count, 		leave_node_number);
+		}
+	
+	
 	//op_prg_log_entry_write(g_nwk_debugger_log_handle, "leave set success\n");
 	FOUT;
 }
@@ -3320,8 +3447,8 @@ static void nwk_send_backup_info(int type,int addOrReduce,int NWKAddress,int sta
 			pklen = FRAMCONTR_LEN + MACSEQ_LEN + PANID_LEN + NWKCONTR_LEN + SHORTADDR_LEN + SHORTADDR_LEN + LENGTH_LEN;
 			pklen += 8*len;
 			nwk_generate_packet(pklen,0,1,2,2,g_nwk_my_short_address,g_nwk_backup_router,13,0,len,payLoad,OUT_NWK_TO_MCPS_DOWN,0);
-			printf("Node %d send a g_nwk_routing_table backup num = %x\n",g_nwk_my_ESN_address,num_max);
-			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a g_nwk_routing_table backup num = %x\n",g_nwk_my_ESN_address,num_max);
+			printf("Node %d send a g_nwk_routing_table backup num = %d\n",g_nwk_my_ESN_address,num_max);
+			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a g_nwk_routing_table backup num = %d\n",g_nwk_my_ESN_address,num_max);
 			break;
 	case 1://CT Backup
 			entry_len = 9;
@@ -3356,8 +3483,8 @@ static void nwk_send_backup_info(int type,int addOrReduce,int NWKAddress,int sta
 			pklen = FRAMCONTR_LEN + MACSEQ_LEN + PANID_LEN + NWKCONTR_LEN + SHORTADDR_LEN + SHORTADDR_LEN + LENGTH_LEN;
 			pklen += 8*len;
 			nwk_generate_packet(pklen,0,1,2,2,g_nwk_my_short_address,g_nwk_backup_router,13,0,len,payLoad,OUT_NWK_TO_MCPS_DOWN,0);
-			printf("Node %d send a CT backup num = %x\n",g_nwk_my_ESN_address,num_max);
-			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a CT backup num = %x\n",g_nwk_my_ESN_address,num_max);
+			printf("Node %d send a CT backup num = %d\n",g_nwk_my_ESN_address,num_max);
+			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a CT backup num = %d\n",g_nwk_my_ESN_address,num_max);
 			break;
 	case 2://g_nwk_routing_table and CT Backup
 			entry_len = 0;
@@ -3416,8 +3543,8 @@ static void nwk_send_backup_info(int type,int addOrReduce,int NWKAddress,int sta
 			pklen = FRAMCONTR_LEN + MACSEQ_LEN + PANID_LEN + NWKCONTR_LEN + SHORTADDR_LEN + SHORTADDR_LEN + LENGTH_LEN;
 			pklen += 8*len;
 			nwk_generate_packet(pklen,0,1,2,2,g_nwk_my_short_address,g_nwk_backup_router,13,0,len,payLoad,OUT_NWK_TO_MCPS_DOWN,0);
-			printf("Node %d send a Info backup num = %x\n",g_nwk_my_ESN_address,num_max);
-			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a Info backup num = %x\n",g_nwk_my_ESN_address,num_max);
+			printf("Node %d send a Info backup num = %d\n",g_nwk_my_ESN_address,num_max);
+			//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d send a Info backup num = %d\n",g_nwk_my_ESN_address,num_max);
 			break;
 	}
 	for(i = 0; i < g_nwk_routing_table.number; i++)
@@ -3564,6 +3691,7 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 				op_ima_obj_attr_get(g_nwk_nodeID,"g_node_type",&g_nwk_node_type);
 				//op_ima_obj_attr_get(g_nwk_nodeID,"father",&g_nwk_my_father_short_address);
 				op_ima_obj_attr_get(g_nwk_nodeID,"g_node_main_router_id",&g_nwk_main_routing_address);
+				op_ima_obj_attr_get(g_nwk_nodeID,"g_test_type",&g_nwk_test_type);
 				
 				//printf("Node %d start!\n", g_nwk_my_ESN_address);
 				
@@ -3576,6 +3704,7 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 				else						g_nwk_capability |= ENDNODE<<4;
 				g_nwk_my_short_address = 0;
 				g_nwk_result = 0;
+				g_nwk_join_time = 0;
 				
 				
 				if(g_nwk_node_type == GATENODE )
@@ -3594,11 +3723,14 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 				if ((status != OPC_COMPCODE_FAILURE) && (severity != PrgC_Log_Severity_Information))
 				   op_prg_log_handle_severity_set(&g_nwk_info_log_handle, PrgC_Log_Severity_Information);
 				
-				g_nwk_debugger_log_handle = op_prg_log_handle_create(OpC_Log_Category_Configuration, "NWK", "debugger", conf_log_limit);
+				g_nwk_debugger_log_handle = op_prg_log_handle_create(OpC_Log_Category_Configuration, "NWK", "debugger", 1);
 				
 				status = op_prg_log_handle_severity_get (g_nwk_debugger_log_handle, &severity);
 				if ((status != OPC_COMPCODE_FAILURE) && (severity != PrgC_Log_Severity_Debug ))
 				   op_prg_log_handle_severity_set(&g_nwk_debugger_log_handle, PrgC_Log_Severity_Debug );
+				
+				
+				
 				
 				
 				//op_prg_log_entry_write(g_nwk_info_log_handle, "Node %d start!\n", g_nwk_my_ESN_address);
@@ -3621,17 +3753,36 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 				
 				
 				
+				
+				
 				online_number_gstathandle	= op_stat_reg ("Traffic NWK.Online Number",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
 				
 				
 				rcvd_pkts = 0;
 				
+				send_up_num              = op_stat_reg ("Traffic NWK.Send_up_num",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				send_dowm_num            = op_stat_reg ("Traffic NWK.Send_dowm_num",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				recv_up_num              = op_stat_reg ("Traffic NWK.Recv_up_num",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				recv_dowm_num            = op_stat_reg ("Traffic NWK.Recv_dowm_num",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
 				recv_send_rate              = op_stat_reg ("Traffic NWK.Received-Send-Rate",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
 				
+				
+				recv_send_rate_down         = op_stat_reg ("Traffic NWK.Received-Send-Rate-Down",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				ete_delay_gstathandle_down		= op_stat_reg ("Traffic NWK.End-to-End Delay Down (seconds)",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
 				
 				
 				
 				ete_delay_l_n		= op_stat_reg ("Traffic NWK.Node End-to-End Delay (seconds)",		OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
+				
+				multicast_count		= op_stat_reg ("Traffic NWK.Node mutilcast Received Count",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				leave_node_count	= op_stat_reg ("Traffic NWK.Node Leaved Count",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
+				
+				join_time_lstathandle		= op_stat_reg ("Traffic NWK.join_time_lstathandle",		OPC_STAT_INDEX_NONE, OPC_STAT_LOCAL);
 				
 				}
 				FSM_PROFILE_SECTION_OUT (state0_enter_exec)
@@ -3775,11 +3926,11 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 			FSM_STATE_EXIT_UNFORCED (4, "WAN", "WSN_NWK_Process [WAN exit execs]")
 				FSM_PROFILE_SECTION_IN ("WSN_NWK_Process [WAN exit execs]", state4_exit_exec)
 				{
-				if(JOINFAILT && NON_FATHER)	printf("1\n");
+				/*if(JOINFAILT && NON_FATHER)	printf("1\n");
 				if(INTRPT_STRM_MCPS_UP)	printf("2\n");
 				if(INTRPT_RESEND_JOIN)	printf("3\n");
 				if(JOINFAILT && NONA_FATHER)	printf("4\n");
-				if(JOINFAILT) printf("5555\n");
+				if(JOINFAILT) printf("5555\n");*/
 				}
 				FSM_PROFILE_SECTION_OUT (state4_exit_exec)
 
@@ -3893,18 +4044,24 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 					destMode = 1;
 					sourceMode = 2;
 					g_pk_send_up++;
+					op_stat_write(send_up_num, g_pk_send_up);
 					nwk_generate_packet(pklen,0,1,sourceMode,destMode,g_nwk_my_short_address,dest,type,NWK_MAX_RADIUS-1,len,payLoad,OUT_NWK_TO_MCPS_UP,0);
 					//op_stat_write(up_data_send_num,++upSendNum);
 				}
 				else if(g_nwk_node_type == GATENODE)
 				{
-					dest = quiryNWKAddress(dest);
+					if(onlineNodes[dest] == 1) 
+						{
+						dest = quiryNWKAddress(dest);
+						}
+					else dest = -1;
 					//printf("NWKAddress %d !!!!!!!!!!!!!!!!!!\n",dest);
 					if(dest > 0)
 					{
 						destMode = 2;
 						sourceMode = 1;
 						g_pk_send_down++;
+						op_stat_write(send_dowm_num, g_pk_send_down);
 						nwk_generate_packet(pklen,0,1,sourceMode,destMode,g_nwk_my_short_address,dest,type,NWK_MAX_RADIUS-1,len,payLoad,OUT_NWK_TO_MCPS_DOWN,0);//单播
 						//nwk_generate_packet(pklen,1,0,sourceMode,destMode,g_nwk_my_short_address,1,type,NWK_MAX_RADIUS-1,len,payLoad,OUT_NWK_TO_MCPS_DOWN,0);//组播
 						//op_stat_write(down_data_send_num,++downSendNum);
@@ -3986,11 +4143,15 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 							nwk_generate_packet(pklen,0,1,sourceMode,destMode,source,dest,type,NWK_MAX_RADIUS,len,payLoad,OUT_NWK_TO_MCPS_UP,0);
 							//op_stat_write(contr_send_num,++sendNum);
 							break;
-					case 5: sourceMode = 1;
-							destMode = 2;
-							source = g_nwk_my_short_address;
-							pklen += SHORTADDR_LEN;
-							nwk_generate_packet(pklen,0,1,sourceMode,destMode,source,dest,type,NWK_MAX_RADIUS-1,len,payLoad,OUT_NWK_TO_MCPS_DOWN,0);
+					case 5: dest = quiryNWKAddress(dest);
+							if(dest > 0)
+								{
+								sourceMode = 1;
+								destMode = 2;
+								source = g_nwk_my_short_address;
+								pklen += SHORTADDR_LEN;
+								nwk_generate_packet(pklen,0,1,sourceMode,destMode,source,dest,type,NWK_MAX_RADIUS-1,len,payLoad,OUT_NWK_TO_MCPS_DOWN,0);
+								}
 							//op_stat_write(contr_send_num,++sendNum);
 							break;
 					case 6: sourceMode = 2;
@@ -4273,6 +4434,8 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 							nwk_process_down_data(payload, destMode, dest, sourceMode, source, len);
 							printf("----------------------------Node %d receive a multicast down data!  ----",g_nwk_my_ESN_address);
 							printf("len = %x-------------------\n",len);
+							multicast_receive_num++;
+							op_stat_write (multicast_count, 		multicast_receive_num);
 							op_prg_log_entry_write(g_nwk_info_log_handle, "----------------------------Node %d receive a multicast down data!  ----",g_nwk_my_ESN_address);
 						}
 					if(g_nwk_node_type == ROUTERNODE && ((g_nwk_children_multicast_table.group>>(dest - 1))&1) > 0)
@@ -4332,10 +4495,10 @@ WSN_NWK_Process (OP_SIM_CONTEXT_ARG_OPT)
 								{
 								nwk_send_conflict(shortAddress);
 								}break;
-					case LEAVE:op_pk_fd_get(mlme,1,&res);
+					/*case LEAVE:op_pk_fd_get(mlme,1,&res);
 							nwk_leave_confirm(res);
 							op_prg_log_entry_write(g_nwk_debugger_log_handle, "leave mlme res = %d\n", res);
-							break;
+							break;*/
 					case SYN_SEQ_SET:op_pk_fd_get(mlme,1,&res);
 							nwk_syn_seq_comfirn(res);
 							break;
@@ -4807,6 +4970,17 @@ _op_WSN_NWK_Process_terminate (OP_SIM_CONTEXT_ARG_OPT)
 #undef recv_send_rate
 #undef ete_delay_l_n
 #undef online_number_gstathandle
+#undef recv_send_rate_down
+#undef ete_delay_gstathandle_down
+#undef multicast_count
+#undef leave_node_count
+#undef g_nwk_test_type
+#undef g_nwk_join_time
+#undef join_time_lstathandle
+#undef send_up_num
+#undef send_dowm_num
+#undef recv_up_num
+#undef recv_dowm_num
 
 #undef FIN_PREAMBLE_DEC
 #undef FIN_PREAMBLE_CODE
@@ -5111,6 +5285,61 @@ _op_WSN_NWK_Process_svar (void * gen_ptr, const char * var_name, void ** var_p_p
 	if (strcmp ("online_number_gstathandle" , var_name) == 0)
 		{
 		*var_p_ptr = (void *) (&prs_ptr->online_number_gstathandle);
+		FOUT
+		}
+	if (strcmp ("recv_send_rate_down" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->recv_send_rate_down);
+		FOUT
+		}
+	if (strcmp ("ete_delay_gstathandle_down" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->ete_delay_gstathandle_down);
+		FOUT
+		}
+	if (strcmp ("multicast_count" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->multicast_count);
+		FOUT
+		}
+	if (strcmp ("leave_node_count" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->leave_node_count);
+		FOUT
+		}
+	if (strcmp ("g_nwk_test_type" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_nwk_test_type);
+		FOUT
+		}
+	if (strcmp ("g_nwk_join_time" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_nwk_join_time);
+		FOUT
+		}
+	if (strcmp ("join_time_lstathandle" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->join_time_lstathandle);
+		FOUT
+		}
+	if (strcmp ("send_up_num" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->send_up_num);
+		FOUT
+		}
+	if (strcmp ("send_dowm_num" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->send_dowm_num);
+		FOUT
+		}
+	if (strcmp ("recv_up_num" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->recv_up_num);
+		FOUT
+		}
+	if (strcmp ("recv_dowm_num" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->recv_dowm_num);
 		FOUT
 		}
 	*var_p_ptr = (void *)OPC_NIL;

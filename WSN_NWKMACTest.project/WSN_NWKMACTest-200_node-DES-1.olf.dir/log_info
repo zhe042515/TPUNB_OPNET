@@ -1,19 +1,15 @@
 
 [Log Info:]
 version :	1
-row_count :	4352
+row_count :	211
 max_log_row :	5000
 max_file_row :	1000
 hide_date :	TRUE
 include_severity :	TRUE
-file_count :	5
+file_count :	1
 
 [File List:]
-40412_04-07-2022_09.00.17	352	09:00:18 Apr 07 2022	09:00:43 Apr 07 2022
-40412_04-07-2022_08.59.52	1000	08:59:52 Apr 07 2022	09:00:17 Apr 07 2022
-40412_04-07-2022_08.59.41	1000	08:59:41 Apr 07 2022	08:59:52 Apr 07 2022
-40412_04-07-2022_08.59.33	1000	08:59:33 Apr 07 2022	08:59:41 Apr 07 2022
-40412_04-07-2022_08.59.28	1000	08:59:29 Apr 07 2022	08:59:33 Apr 07 2022
+53968_04-28-2022_02.43.41	211	02:43:44 Apr 28 2022	02:51:27 Apr 28 2022
 
 [Column Dependency List:]
 dependency_count :	1
@@ -27,37 +23,37 @@ log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	MAC_DOWN
 7	SubClass	2	debug
-incident_count :	8487
+incident_count :	11895
 
 log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	MAC_DOWN
 7	SubClass	2	info
-incident_count :	617
+incident_count :	607
 
 log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	MAC_UP
 7	SubClass	2	debug
-incident_count :	49879
+incident_count :	77463
 
 log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	MAC_UP
 7	SubClass	2	info
-incident_count :	5170
+incident_count :	4882
 
 log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	NWK
 7	SubClass	2	debugger
-incident_count :	4140
+incident_count :	6036
 
 log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	NWK
 7	SubClass	2	info
-incident_count :	203
+incident_count :	200
 
 log_handle_column_count :	3
 5	Category	2	Configuration

@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char control_test_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A op_runsim 7 623C2AD6 623C2AD6 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                  ";
+const char control_test_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 625E10D5 625E10D5 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -169,7 +169,7 @@ static void contr_multicast_send(int type,int destAddress,int num, int arr[])
 			{
 			op_pk_fd_set(payLoad,i+1,OPC_FIELD_TYPE_INTEGER,arr[i],16);
 			}
-		contr_generate_pk(payLoad,MULTICASTCONTR_LEN + (16*num),MULTICAST_TYPE,destAddress,0);
+		contr_generate_pk(payLoad,MULTICASTCONTR_LEN + (16*num),MULTICAST_TYPE,destAddress,(op_dist_uniform(20) * 10));
 	}
 	FOUT;
 }
@@ -202,7 +202,7 @@ static void generate_mutilcast_data_pk(int mutilcast_id)
 	//op_pk_fd_set(payLoad,1,OPC_FIELD_TYPE_INTEGER,type,8);
 	//op_pk_fd_set(payLoad,2,OPC_FIELD_TYPE_INTEGER,destAddress,16);
 	op_pk_fd_set(payLoad,0,OPC_FIELD_TYPE_INTEGER,r,len*8);
-	contr_generate_pk(payLoad,len,8,destAddress,0);
+	contr_generate_pk(payLoad,len,8,destAddress,op_dist_uniform(30) * 10);
 	printf("Node %d source make mutilcast data packet data = %d len = %d, dest = %d,time=%f\n",myMACAddress, r, len, destAddress, op_sim_time());
 	
 	FOUT;
@@ -224,7 +224,7 @@ static void leaveControl(int destAddress, int rejoin, int replace)
 		leaveInfo = 2 | rejoin<<2 | replace << 4;
 		payLoad = op_pk_create(0);
 		op_pk_fd_set(payLoad,0,OPC_FIELD_TYPE_INTEGER,leaveInfo,LEAVE_LEN);
-		contr_generate_pk(payLoad,LEAVE_LEN,LEAVE_TYPE,destAddress,0);
+		contr_generate_pk(payLoad,LEAVE_LEN,LEAVE_TYPE,destAddress,(op_dist_uniform(20) * 5));
 	}
 	FOUT;
 }
@@ -284,7 +284,8 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 				nodeID = op_topo_parent(op_id_self());
 				op_ima_obj_attr_get(nodeID,"g_node_type",&nodeType);
 				op_ima_obj_attr_get(nodeID,"g_node_ESN_address",&myMACAddress);
-				op_ima_obj_attr_get(nodeID,"g_test_type",&g_test_type);
+				if(nodeType == GATENODE) op_ima_obj_attr_get(nodeID,"g_test_type",&g_test_type);
+				else g_test_type = 0;
 				//printf("control init\n");
 				
 				}
@@ -305,9 +306,9 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 
 			FSM_TRANSIT_SWITCH
 				{
-				FSM_CASE_TRANSIT (0, 3, state3_enter_exec, timer(1800,startCode);;, "g_test_type == MUTILCAST", "timer(1800,startCode);", "init", "mutilcast_init", "tr_3", "control_test [init -> mutilcast_init : g_test_type == MUTILCAST / timer(1800,startCode);]")
-				FSM_CASE_TRANSIT (1, 4, state4_enter_exec, timer(1800,startCode);;, "g_test_type == LEAVE", "timer(1800,startCode);", "init", "leave_init", "tr_5", "control_test [init -> leave_init : g_test_type == LEAVE / timer(1800,startCode);]")
-				FSM_CASE_TRANSIT (2, 9, state9_enter_exec, timer(1800,startCode);;, "g_test_type == REJOIN", "timer(1800,startCode);", "init", "rejoin", "tr_15", "control_test [init -> rejoin : g_test_type == REJOIN / timer(1800,startCode);]")
+				FSM_CASE_TRANSIT (0, 3, state3_enter_exec, timer(1800 * 3,startCode);;, "g_test_type == MUTILCAST", "timer(1800 * 3,startCode);", "init", "mutilcast_init", "tr_3", "control_test [init -> mutilcast_init : g_test_type == MUTILCAST / timer(1800 * 3,startCode);]")
+				FSM_CASE_TRANSIT (1, 4, state4_enter_exec, timer(1800*4,startCode);;, "g_test_type == LEAVE", "timer(1800*4,startCode);", "init", "leave_init", "tr_5", "control_test [init -> leave_init : g_test_type == LEAVE / timer(1800*4,startCode);]")
+				FSM_CASE_TRANSIT (2, 9, state9_enter_exec, timer(1800*3,startCode);;, "g_test_type == REJOIN", "timer(1800*3,startCode);", "init", "rejoin", "tr_15", "control_test [init -> rejoin : g_test_type == REJOIN / timer(1800*3,startCode);]")
 				FSM_CASE_TRANSIT (3, 12, state12_enter_exec, ;, "default", "", "init", "idle", "tr_19", "control_test [init -> idle : default / ]")
 				}
 				/*---------------------------------------------------------*/
@@ -356,7 +357,9 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 				{
 				int arr[] = {1, 2};
 				printf("send a add mutilcast!\n");
-				contr_multicast_send(1,dest ,2, arr);
+				contr_multicast_send(1,14 ,2, arr);
+				contr_multicast_send(1,56 ,2, arr);
+				contr_multicast_send(1,123 ,2, arr);
 				}
 				FSM_PROFILE_SECTION_OUT (state2_enter_exec)
 
@@ -416,7 +419,7 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 				{
 				if(nodeType == GATENODE) {
 					result = 1;
-					dest = 2;
+					dest = (int) op_dist_uniform (200 - 1) + 1;
 				}
 				
 				else{
@@ -486,7 +489,13 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 				FSM_PROFILE_SECTION_IN ("control_test [send_leave enter execs]", state6_enter_exec)
 				{
 				printf("send a leave control!\n");
-				leaveControl(dest, 0, 0);
+				leaveControl(56, 0, 0);
+				leaveControl(89, 0, 0);
+				leaveControl(123, 0, 0);
+				leaveControl(134, 0, 0);
+				//leaveControl(189, 0, 0);
+				leaveControl(40, 0, 0);
+				
 				}
 				FSM_PROFILE_SECTION_OUT (state6_enter_exec)
 
@@ -505,7 +514,7 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 				FSM_PROFILE_SECTION_IN ("control_test [send_muilticast_remove enter execs]", state7_enter_exec)
 				{
 				int arr[] = {1, 2};
-				contr_multicast_send(0,dest ,2, arr);
+				contr_multicast_send(0,14 ,2, arr);
 				}
 				FSM_PROFILE_SECTION_OUT (state7_enter_exec)
 
@@ -524,6 +533,11 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 				FSM_PROFILE_SECTION_IN ("control_test [send_data enter execs]", state8_enter_exec)
 				{
 				generate_mutilcast_data_pk(2);
+				generate_mutilcast_data_pk(2);
+				
+				generate_mutilcast_data_pk(1);
+				
+				
 				}
 				FSM_PROFILE_SECTION_OUT (state8_enter_exec)
 
@@ -531,7 +545,7 @@ control_test (OP_SIM_CONTEXT_ARG_OPT)
 			FSM_STATE_EXIT_FORCED (8, "send_data", "control_test [send_data exit execs]")
 				FSM_PROFILE_SECTION_IN ("control_test [send_data exit execs]", state8_exit_exec)
 				{
-				op_intrpt_schedule_self(op_sim_time()+180,removeCode);
+				op_intrpt_schedule_self(op_sim_time()+500,removeCode);
 				}
 				FSM_PROFILE_SECTION_OUT (state8_exit_exec)
 

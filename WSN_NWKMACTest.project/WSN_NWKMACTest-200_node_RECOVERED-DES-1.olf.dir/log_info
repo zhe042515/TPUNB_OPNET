@@ -1,0 +1,78 @@
+
+[Log Info:]
+version :	1
+row_count :	4306
+max_log_row :	5000
+max_file_row :	1000
+hide_date :	TRUE
+include_severity :	TRUE
+file_count :	5
+
+[File List:]
+36776_04-12-2022_07.36.44	306	07:36:44 Apr 12 2022	07:37:10 Apr 12 2022
+36776_04-12-2022_07.36.19	1000	07:36:19 Apr 12 2022	07:36:44 Apr 12 2022
+36776_04-12-2022_07.36.09	1000	07:36:09 Apr 12 2022	07:36:19 Apr 12 2022
+36776_04-12-2022_07.35.59	1000	07:35:59 Apr 12 2022	07:36:09 Apr 12 2022
+36776_04-12-2022_07.35.54	1000	07:35:55 Apr 12 2022	07:35:59 Apr 12 2022
+
+[Column Dependency List:]
+dependency_count :	1
+6	7
+
+
+[Summary]
+
+
+log_handle_column_count :	3
+5	Category	2	Configuration
+6	Class	2	MAC_DOWN
+7	SubClass	2	debug
+incident_count :	8123
+
+log_handle_column_count :	3
+5	Category	2	Configuration
+6	Class	2	MAC_DOWN
+7	SubClass	2	info
+incident_count :	602
+
+log_handle_column_count :	3
+5	Category	2	Configuration
+6	Class	2	MAC_UP
+7	SubClass	2	debug
+incident_count :	50315
+
+log_handle_column_count :	3
+5	Category	2	Configuration
+6	Class	2	MAC_UP
+7	SubClass	2	info
+incident_count :	4915
+
+log_handle_column_count :	3
+5	Category	2	Configuration
+6	Class	2	NWK
+7	SubClass	2	debugger
+incident_count :	4097
+
+log_handle_column_count :	3
+5	Category	2	Configuration
+6	Class	2	NWK
+7	SubClass	2	info
+incident_count :	200
+
+log_handle_column_count :	3
+5	Category	2	Configuration
+6	Class	2	TMM
+7	SubClass	2	closure stage loading of propagation model
+incident_count :	0
+
+log_handle_column_count :	3
+5	Category	2	Low-Level
+6	Class	2	Simulation
+7	SubClass	2	Message
+incident_count :	0
+
+log_handle_column_count :	3
+5	Category	2	Low-Level
+6	Class	2	TMM
+7	SubClass	2	path loss calculation
+incident_count :	0
