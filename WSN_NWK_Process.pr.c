@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62738EED 62738EED 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6274892F 6274892F 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -46,20 +46,23 @@ const char WSN_NWK_Process_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62738E
 #define NWK_TIMER_UPDATE						5
 #define NWK_TIMER_RT							100
 #define NWK_COUNT_CT_STATUS						1
-#define NWK_COUNT_BACKUP						10
-#define NWK_COUNT_RT_ACTIVE						4*60
-#define NWK_COUNT_RT_TIMEOUT					20
+#define NWK_COUNT_BACKUP						100 / NWK_TIMER 
+//路由维护周期和路由维护超时时间，单位：秒，由于仿真时每10s轮询，因此需要除以轮询周期，/ NWK_TIMER 
+#define NWK_COUNT_RT_ACTIVE						30*60 / NWK_TIMER 
+#define NWK_COUNT_RT_TIMEOUT					200 / NWK_TIMER 
 #define NWK_TIMER_UPDATE_STATUS					20
 #define NWK_TIMER_JOIN							100
 
 
 #define NWK_TIMER								10
-#define NWK_TIMER_VALID_FATHER_TABLE			120 * 60
+#define NWK_TIMER_VALID_FATHER_TABLE			30 * 60 
 #define NWK_COUNT_MAPPING_TABLE					120000
 #define NWK_COUNT_ADDRESS_POOL					120 * 60 * 24
 #define NWK_COUNT_ADDRESS_POOL_OLD				120 * 60 * 24
 #define NWK_TIMER_MASTER_MONITOR				60
 #define NWK_TIMER_MUTICAST_MAINTAIN				60*130
+
+#define NWK_Minites								6
 
 //---------------------------------Stream Port Define------------------------------------//
 #define IN_DATA_TO_NWK					1

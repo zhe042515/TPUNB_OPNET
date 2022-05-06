@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_MAC_UP_NEW2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62738F02 62738F02 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_MAC_UP_NEW2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62748962 62748962 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -36,7 +36,7 @@ const char WSN_MAC_UP_NEW2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62738F
 #define		MaxBandWidth			658.0		//最大频段带宽
 #define		PointWidth				1			//频段带宽
 #define		Active_Time_Beacon		50			//信标帧保活时间，单位为帧(5s)
-#define		ACTIVE_TIME				5000000		//子节点保活时间
+#define		ACTIVE_TIME				30*60*2		//子节点保活时间
 #define		RETRANS_TIME			6			//重传等待时间
 #define		ACK_TIME				2			//创建的ACK等待时间
 #define		FATHER_NODE_NUM			6			//潜在父节点表数量
