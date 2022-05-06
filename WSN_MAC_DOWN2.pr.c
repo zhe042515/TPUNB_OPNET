@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_MAC_DOWN2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269FF58 6269FF58 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_MAC_DOWN2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62727FDB 62727FDB 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -18,12 +18,6 @@ const char WSN_MAC_DOWN2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269FF58
 
 //-----------------------*声明头文件*-----------------------//
 #include <math.h>
-
-
-#define		error_rate				0.97
-
-
-
 
 //-----------------------定义常量-----------------------//
 #define		CEN_NODE				43690		//中心节点id
@@ -404,6 +398,7 @@ typedef struct
 	double	                 		down_net_cost                                   ;
 	Stathandle	             		down_success_rate                               ;
 	Stathandle	             		g_down_success_rate                             ;
+	double	                 		frame_error_rate                                ;
 	} WSN_MAC_DOWN2_state;
 
 #define subnet_objid            		op_sv_ptr->subnet_objid
@@ -473,6 +468,7 @@ typedef struct
 #define down_net_cost           		op_sv_ptr->down_net_cost
 #define down_success_rate       		op_sv_ptr->down_success_rate
 #define g_down_success_rate     		op_sv_ptr->g_down_success_rate
+#define frame_error_rate        		op_sv_ptr->frame_error_rate
 
 /* These macro definitions will define a local variable called	*/
 /* "op_sv_ptr" in each function containing a FIN statement.	*/
@@ -2207,6 +2203,11 @@ WSN_MAC_DOWN2 (OP_SIM_CONTEXT_ARG_OPT)
 				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_ESN_address",	&g_mac_node_id);
 				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_type"	,	&g_mac_node_type);
 				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
+				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_error_rate",	&frame_error_rate);
+				
+				
+				
+				
 				//printf("本节点的MAC地址是%d\n",g_mac_node_id);
 				
 				
@@ -2460,7 +2461,7 @@ WSN_MAC_DOWN2 (OP_SIM_CONTEXT_ARG_OPT)
 					{
 					pk = op_pk_get(op_intrpt_strm());
 					error = op_dist_uniform (1.0);
-					if(error<=error_rate)
+					if(error<=frame_error_rate)
 						{
 						op_pk_fd_get (pk, 4, &source);
 						if(source == g_mac_node_id)
@@ -2927,6 +2928,7 @@ _op_WSN_MAC_DOWN2_terminate (OP_SIM_CONTEXT_ARG_OPT)
 #undef down_net_cost
 #undef down_success_rate
 #undef g_down_success_rate
+#undef frame_error_rate
 
 #undef FIN_PREAMBLE_DEC
 #undef FIN_PREAMBLE_CODE
@@ -3316,6 +3318,11 @@ _op_WSN_MAC_DOWN2_svar (void * gen_ptr, const char * var_name, void ** var_p_ptr
 	if (strcmp ("g_down_success_rate" , var_name) == 0)
 		{
 		*var_p_ptr = (void *) (&prs_ptr->g_down_success_rate);
+		FOUT
+		}
+	if (strcmp ("frame_error_rate" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->frame_error_rate);
 		FOUT
 		}
 	*var_p_ptr = (void *)OPC_NIL;

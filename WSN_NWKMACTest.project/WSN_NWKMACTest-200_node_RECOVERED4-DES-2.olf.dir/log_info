@@ -9,7 +9,7 @@ include_severity :	TRUE
 file_count :	1
 
 [File List:]
-18224_05-05-2022_03.41.01	211	03:41:02 May 05 2022	03:43:23 May 05 2022
+11368_05-05-2022_03.31.08	211	03:31:08 May 05 2022	03:34:02 May 05 2022
 
 [Column Dependency List:]
 dependency_count :	1
@@ -23,7 +23,7 @@ log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	MAC_DOWN
 7	SubClass	2	debug
-incident_count :	9207
+incident_count :	23861
 
 log_handle_column_count :	3
 5	Category	2	Configuration
@@ -35,19 +35,19 @@ log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	MAC_UP
 7	SubClass	2	debug
-incident_count :	55193
+incident_count :	269894
 
 log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	MAC_UP
 7	SubClass	2	info
-incident_count :	5200
+incident_count :	5000
 
 log_handle_column_count :	3
 5	Category	2	Configuration
 6	Class	2	NWK
 7	SubClass	2	debugger
-incident_count :	4863
+incident_count :	19777
 
 log_handle_column_count :	3
 5	Category	2	Configuration
