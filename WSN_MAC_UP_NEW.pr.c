@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_MAC_UP_NEW_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269F49B 6269F49B 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_MAC_UP_NEW_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A op_runsim 7 62A6A02B 62A6A02B 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                  ";
 #include <string.h>
 
 
@@ -18,6 +18,7 @@ const char WSN_MAC_UP_NEW_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269F49
 
 //-----------------------*声明头文件*-----------------------//
 #include <math.h>
+
 
 //-----------------------定义常量-----------------------//
 #define		CEN_NODE				43690		//中心节点id
@@ -36,13 +37,15 @@ const char WSN_MAC_UP_NEW_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269F49
 #define		MaxBandWidth			658.0		//最大频段带宽
 #define		PointWidth				1			//频段带宽
 #define		Active_Time_Beacon		50			//信标帧保活时间，单位为帧(5s)
-#define		ACTIVE_TIME				2*60*30		//子节点保活时间
+#define		ACTIVE_TIME				30*2*60		//子节点保活时间
 #define		RETRANS_TIME			6			//重传等待时间
 #define		ACK_TIME				2			//创建的ACK等待时间
 #define		FATHER_NODE_NUM			6			//潜在父节点表数量
 #define		MAX_ASSOCIATE_TIME		6			//关联最大等待时间
 #define		MAX_SEQUENCE_NUM		6			//最大滑动窗格个数（0号值是第二个序列号的值）
 #define		MAX_RETRANS_NUM			10			//最大重传队列长度
+#define		MAX_BACKUP_TIME 		12			//备份节点与父节点的最大保活间隔
+
 //长度为6，保存五个
 #define		macMaxBE				7			//最大退避因子(5~9)
 #define		macMinBE				3			//最小退避因子固定为3
@@ -80,10 +83,13 @@ const char WSN_MAC_UP_NEW_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269F49
 #define		MLME_ALIVE_REQUEST		2			//节点保活原语
 #define		MLME_ALIVE_confirm		2			//节点保活回复原语
 #define		MLME_CONFLICT_confirm	4			//节点地址冲突回复原语
+#define		MLME_MULTICAST_request	5			//节点组播回复原语
 #define		MLME_MULTICAST_confirm	5			//节点组播回复原语
 #define		MLME_SET_CHANNEL		6			//设置信道频段频点原语（备份节点工作使用）
 #define		MLME_LEAVE_REQUEST		7			//离网请求原语
 #define		MLME_LEAVE_confirm		7			//离网确认原语
+#define		MLME_BACKUP_seq			8			//路由备份序列号原语
+#define		MLME_BACKUP_confirm		9			//备份节点监听主节点结果原语
 
 
 
@@ -114,11 +120,11 @@ const char WSN_MAC_UP_NEW_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6269F49
 
 
 
-#define		CSMA_MODE				0			//1使用CSMA；０使用ALOHA
+//#define		CSMA_MODE				0			//1使用CSMA；０使用ALOHA
 #define 	MAXTTL					2
-#define 	MAX_NODE				200
+#define 	MAX_NODE				300
 #define 	MAX_ROUTER				48
-#define 	MAX_CHILD				50
+#define 	MAX_CHILD				20
 #define 	MAX_RouterAddress		128
 #define 	GATEPOINTNUM			8
 #define 	POINTNUM				2
@@ -215,14 +221,17 @@ struct KeepAliveFrame
 	{
 	int dest;
 	int seq;
+	int flag;
 	};
 
 struct childrenTable{
 	int ESNAddress;
 	int NWKAddress;
-	int status;		//2表示删除
+	int status;
 	int CapabilityInformation;
+	int JoinCount;
 };
+
 struct CTable{
 	int number;
 	struct childrenTable table[MAX_CHILD];
@@ -259,10 +268,11 @@ static void 	mac_init();
 static void 	scan_channel();
 static void		change_band();
 static void 	MLME_SCAN_CONFIRM();
-static void 	MLME_ASSOCIATE_CONFIRM(int result);
-static void 	MLME_ALIVE_CONFIRM(int dest,int result);
+static void 	MLME_ASSOCIATE_CONFIRM(int result,int associatetype);
+static void 	MLME_ALIVE_CONFIRM(int dest,int result,int flag);
 static void 	MLME_CONFLICT_CONFIRM(int address);
 static void 	MLME_LEAVE_CONFIRM(int result);
+static void		MLME_BACKUP_CONFIRM(int result);
 static void 	set_channel(int fatherBand,int frequency);
 static void 	create_associate_frame(int dest,int panid);
 static void 	send_msg_to_father();
@@ -314,7 +324,7 @@ long globle_up_net_cost;
 extern struct NetworkMsg Network_Msg;
 
 struct Fa potentialParent;
-int    Active_from_up[MAX_NODE];
+//int    Active_from_up[MAX_NODE];
 
 
 /*++++++++++++++++++++++++test aloha++++++++++++++++++++++*/
@@ -436,6 +446,14 @@ typedef struct
 	int	                    		retrans_flag                                    ;
 	int	                    		back_off_count                                  ;
 	int	                    		slot_complete_flag                              ;	/* 时隙结束标识，1 标识结束，2，未结束 */
+	int	                    		CSMA_MODE                                       ;	/* 1使用CSMA；０使用ALOHA */
+	double	                 		frame_error_rate                                ;
+	int	                    		g_mac_backup_seq                                ;	/* mac层保存的路由备份序列号 */
+	int	                    		g_mac_backup_seq_flag                           ;	/* mac层收到了路由备份帧，需要在ACK回复中携带相关信息 1:需要携带2;不需要 */
+	int	                    		g_mac_associate_flag                            ;	/* 关联类别2：备份节点切换后从新关联的原语 */
+	int	                    		g_mac_backup_timer                              ;
+	int	                    		g_mac_backup_node                               ;	/* 备份节点身份标识， 1做过备份节点，0.没做过 */
+	int	                    		g_mac_down_slot                                 ;	/* 是否给对下的天线时隙中断   1：没给 2：给了 */
 	} WSN_MAC_UP_NEW_state;
 
 #define subnet_objid            		op_sv_ptr->subnet_objid
@@ -531,6 +549,14 @@ typedef struct
 #define retrans_flag            		op_sv_ptr->retrans_flag
 #define back_off_count          		op_sv_ptr->back_off_count
 #define slot_complete_flag      		op_sv_ptr->slot_complete_flag
+#define CSMA_MODE               		op_sv_ptr->CSMA_MODE
+#define frame_error_rate        		op_sv_ptr->frame_error_rate
+#define g_mac_backup_seq        		op_sv_ptr->g_mac_backup_seq
+#define g_mac_backup_seq_flag   		op_sv_ptr->g_mac_backup_seq_flag
+#define g_mac_associate_flag    		op_sv_ptr->g_mac_associate_flag
+#define g_mac_backup_timer      		op_sv_ptr->g_mac_backup_timer
+#define g_mac_backup_node       		op_sv_ptr->g_mac_backup_node
+#define g_mac_down_slot         		op_sv_ptr->g_mac_down_slot
 
 /* These macro definitions will define a local variable called	*/
 /* "op_sv_ptr" in each function containing a FIN statement.	*/
@@ -568,7 +594,7 @@ static void mac_init()
 	mincost 	= 10;
 	maxcost		= 10;
 	no		= 0;
-	no2		= 0;	
+	no2		= 0;
 	if(CSMA_MODE == 1)
 		{
 		csma_init ();
@@ -606,7 +632,8 @@ static void mac_init()
 	neighbor_table.frequency = 0;
 	neighbor_table.active_time = 0;
 	keepAlive.dest = 0;
-	keepAlive.seq = 0;	
+	keepAlive.seq = 0;
+	keepAlive.flag = 0;
 
 	//队列初始化-----------------------------------------
 	/* Clear SubQ */
@@ -632,6 +659,7 @@ static void mac_init()
 	
 	if(g_mac_node_type != GATE_NODE)
 		{
+		g_mac_down_slot = 1;													//对下的天线无时隙中断
 		g_mac_synch_flag = SYNCH_COMPLETE;											//非网关节点
 		g_mac_node_status = OFFLINE;											//现阶段节点开机就启动时隙，不需要同步步骤
 		g_mac_scan_flag = NO_SCAN;												//需要扫描
@@ -684,9 +712,7 @@ static void	change_band()
 		{
 		//向网络层汇报扫描结果，构建扫描完成原语
 		printf("Node %d MAC send a MLME_SCAN.confirm to INTERFACE\n",g_mac_node_id);
-		op_prg_log_entry_write(g_mac_up_info_log_handle, "Node %d MAC send a MLME_SCAN.confirm to INTERFACE\n",g_mac_node_id);
 		potentialParent.father[g_mac_node_id] = father_table;
-		op_prg_log_entry_write(g_mac_up_info_log_handle, "Node %d MAC father_table.father[0].short_addr = %d,father_table.father[0].band =%d\n",g_mac_node_id,father_table.father[0].short_addr,father_table.father[0].band);
 		MLME_SCAN_CONFIRM();
 		g_mac_scan_flag = NO_SCAN;
 		FOUT;
@@ -737,18 +763,20 @@ static void MLME_SCAN_CONFIRM()
 /*********************************************/
 /*create MLME_ASSOCIATE.confirm,and send it to NWK*/
 /*0:success    1:fail*/
+//associatetype 0:正常关联  1：备份节点关联主节点的父节点  2：备份节点代替主节点从新关联父节点
 /*********************************************/
 /*********************************************/
-static void MLME_ASSOCIATE_CONFIRM(int result)
+static void MLME_ASSOCIATE_CONFIRM(int result,int associatetype)
 	{
 	Packet* MLME_ASSOCIATE;
 	int type;
-	FIN(MLME_SCAN_CONFIRM());
+	FIN(MLME_ASSOCIATE_CONFIRM(int result,int associatetype));
 	type = MLME_ASSOCIATE_confirm;
 	MLME_ASSOCIATE = op_pk_create(0); //32 
 	op_pk_fd_set (MLME_ASSOCIATE, 0, OPC_FIELD_TYPE_INTEGER,type,8) ;
 	op_pk_fd_set (MLME_ASSOCIATE, 1, OPC_FIELD_TYPE_INTEGER,g_mac_associate_target,16) ;
 	op_pk_fd_set (MLME_ASSOCIATE, 2, OPC_FIELD_TYPE_INTEGER,result,8) ;
+	op_pk_fd_set (MLME_ASSOCIATE, 3, OPC_FIELD_TYPE_INTEGER,associatetype,8) ;
 	op_pk_send(MLME_ASSOCIATE,OUT_MAC_NWK_MLME);	
 	FOUT;
 	}
@@ -759,16 +787,17 @@ static void MLME_ASSOCIATE_CONFIRM(int result)
 /*0:success    1:fail*/
 /*********************************************/
 /*********************************************/
-static void MLME_ALIVE_CONFIRM(int dest,int result)
+static void MLME_ALIVE_CONFIRM(int dest,int result,int flag)
 	{
 	Packet* MLME_ALIVE;
 	int type;
-	FIN(MLME_ALIVE_CONFIRM(int dest,int result));
+	FIN(MLME_ALIVE_CONFIRM(int dest,int result,int flag));
 	type = MLME_ALIVE_confirm;
 	MLME_ALIVE = op_pk_create(0);  //32
 	op_pk_fd_set (MLME_ALIVE, 0, OPC_FIELD_TYPE_INTEGER,type,8) ;
 	op_pk_fd_set (MLME_ALIVE, 1, OPC_FIELD_TYPE_INTEGER,dest,16) ;
 	op_pk_fd_set (MLME_ALIVE, 2, OPC_FIELD_TYPE_INTEGER,result,8) ;
+	op_pk_fd_set (MLME_ALIVE, 3, OPC_FIELD_TYPE_INTEGER,flag,8) ;
 	op_pk_send(MLME_ALIVE,OUT_MAC_NWK_MLME);	
 	FOUT;
 	}
@@ -812,6 +841,28 @@ static void MLME_LEAVE_CONFIRM(int result)
 	}
 
 
+
+/*********************************************/
+/*********************************************/
+/*create MLME_BACKUP_CONFIRM,and send it to NWK*/
+/*0:success    1:fail*/
+/*********************************************/
+/*********************************************/
+static void MLME_BACKUP_CONFIRM(int result)
+	{
+	Packet* MLME_BACKUP;
+	int type;
+	FIN(MLME_BACKUP_CONFIRM(int result));
+	type = MLME_BACKUP_confirm;
+	MLME_BACKUP = op_pk_create(0);  //24
+	op_pk_fd_set (MLME_BACKUP, 0, OPC_FIELD_TYPE_INTEGER,type,8) ;
+	op_pk_fd_set (MLME_BACKUP, 1, OPC_FIELD_TYPE_INTEGER,result,8) ;
+	op_pk_send(MLME_BACKUP,OUT_MAC_NWK_MLME);	
+	FOUT;
+	}
+
+
+
 /*********************************************/
 /*********************************************/
 /*cheak queue to father*/
@@ -822,8 +873,7 @@ static void cheak_mac_queue()
 	FIN(cheak_mac_queue());
 	op_subq_flush(Data_Queue);
 	op_subq_flush(Retrans_Queue);
-	op_subq_flush(ACK_Queue);
-	MLME_LEAVE_CONFIRM(1);//对上天线完成离网		
+	op_subq_flush(ACK_Queue);		
 	mac_leave();
 	op_intrpt_schedule_self(op_sim_time(), Mac_Leave_Code);
 	op_prg_log_entry_write(g_mac_up_info_log_handle, "g_mac_synch_flag =%d!!!!!!!\n",g_mac_synch_flag);
@@ -843,6 +893,18 @@ static void mac_leave()
 	op_strm_flush(IN_PHY_MAC);
 	op_strm_flush(IN_NWK_MAC_MLME);
 	op_strm_flush(IN_NWK_MAC_DATA);
+	/*op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
+	if(g_mac_backup_node == 1)			//节点做过备份节点
+		{
+		g_mac_down_slot = 1;
+		g_mac_backup_node = 0;
+		}
+	else								//没做过备份节点
+		{
+		if(g_mac_node_status == ONLINE)
+			g_mac_down_slot = 2;
+		}
+	if(g_mac_node_id == 19) printf("g_mac_down_slot = %d\n",g_mac_down_slot);*/
 	g_mac_leaving = LEAVING_COMPELTE_NEED_SYNCH;	
 	FOUT;
 	}	
@@ -882,14 +944,8 @@ static void beacon_proc(Packet* pk)
 	op_pk_fd_get(pk,10,&router_cost);
 	op_pk_fd_get(pk,11,&frequency);
 	op_pk_fd_get(pk,12,&strenth);
-	if( g_mac_node_status == 1 )
-		{	
-
-		}
-	//printf("op_td_get_dbl (pk, OPC_TDA_RA_RCVD_POWER) = %.16f\n",op_td_get_dbl (pk, OPC_TDA_RA_RCVD_POWER));
 	if(g_mac_scan_flag == NEED_SCAN||g_mac_leaving == LEAVING_COMPELTE_NEED_SYNCH)														//扫描状态,父节点信息存入父节点表
 		{	
-		//if (op_td_get_dbl (pk, OPC_TDA_RA_RCVD_POWER) < 0.00000000000001 )
 		if (op_td_get_dbl (pk, OPC_TDA_RA_RCVD_POWER) < 0.00000000000001 )
 
 			{
@@ -900,8 +956,13 @@ static void beacon_proc(Packet* pk)
 			{
 			op_prg_log_entry_write(g_mac_up_info_log_handle, "SYNCH");
 			op_intrpt_schedule_self(op_sim_time() + Slot_Time-0.11820, Intrpt_Slot);		//自己的时隙中断
-			op_intrpt_schedule_remote(op_sim_time() + Slot_Time-0.11820 ,Intrpt_Slot_Down ,			
-				op_id_from_name(g_mac_node_objid,OPC_OBJTYPE_QUEUE,"MAC_DOWN"));				//对下的MAC的时隙中断
+	/*		if(g_mac_node_status != ONLINE||g_mac_backup_node == 1) 
+				{
+				op_intrpt_schedule_remote(op_sim_time() + Slot_Time-0.11820 ,Intrpt_Slot_Down ,			
+					op_id_from_name(g_mac_node_objid,OPC_OBJTYPE_QUEUE,"MAC_DOWN"));				//对下的MAC的时隙中断
+				g_mac_backup_node = 0;
+				}
+	*/
 			g_mac_synch_flag = SYNCH_COMPLETE;
 			g_mac_leaving = COMPLETE_LEAVING;
 			}
@@ -959,8 +1020,13 @@ static void beacon_proc(Packet* pk)
 			{
 			op_prg_log_entry_write(g_mac_up_info_log_handle, "SYNCH");
 			op_intrpt_schedule_self(op_sim_time() + Slot_Time-0.11820, Intrpt_Slot);		//自己的时隙中断
-			op_intrpt_schedule_remote(op_sim_time() + Slot_Time-0.11820 ,Intrpt_Slot_Down ,			
-				op_id_from_name(g_mac_node_objid,OPC_OBJTYPE_QUEUE,"MAC_DOWN"));				//对下的MAC的时隙中断
+		/*	if(g_mac_node_status != ONLINE||g_mac_backup_node == 1) 
+				{
+				op_intrpt_schedule_remote(op_sim_time() + Slot_Time-0.11820 ,Intrpt_Slot_Down ,			
+					op_id_from_name(g_mac_node_objid,OPC_OBJTYPE_QUEUE,"MAC_DOWN"));				//对下的MAC的时隙中断
+				g_mac_backup_node = 0;
+				}
+		*/
 			g_mac_synch_flag = SYNCH_COMPLETE;
 			g_mac_leaving = COMPLETE_LEAVING;
 			}
@@ -992,7 +1058,6 @@ static void set_channel(int fatherBand,int frequency)
 	op_ima_obj_attr_get (channel_of_send_to_father,"min frequency",&b);
 	printf("node %d channel_of_recvive_from_father = %f ;channel_of_send_to_father = %f\n",g_mac_node_id,a,b);	
 	op_prg_log_entry_write(g_mac_up_debug_log_handle, "node %d channel_of_recvive_from_father = %f ;channel_of_send_to_father = %f\n",g_mac_node_id,a,b);	
-	
 	op_ima_obj_attr_set (channel_of_father_received,"min frequency",sendFreq);
 	FOUT;
 	}
@@ -1031,25 +1096,36 @@ static void create_associate_frame(int dest,int panid)
 			FOUT;
 			}		
 		}
+	associateRequest = op_pk_create(0);//120
 	g_mac_associate_times++;
-	framecontrol = 25123;//011 0001000 10 00 11
+	op_ima_obj_attr_get (g_mac_node_objid,	"g_node_short_address",	&g_mac_short_address);
+	if(g_mac_short_address != 0)
+		{
+		framecontrol = 25122;//011 0001000 10 00 10
+		source = g_mac_short_address;
+		op_pk_fd_set (associateRequest, 4, OPC_FIELD_TYPE_INTEGER,source,16) ;
+		}
+	else
+		{
+		framecontrol = 25123;//011 0001000 10 00 11	
+		source = g_mac_node_id;
+		op_pk_fd_set (associateRequest, 4, OPC_FIELD_TYPE_INTEGER,source,48) ;
+		}
 	type = (framecontrol>>13)&7;
 	seq = g_mac_sequence;
 	g_mac_sequence = (g_mac_sequence+1)%256;
 	pan = panid;
 	dest_addr = dest;
-	source = g_mac_node_id;
 	length = 3;
 	subcontrol = 0;
-	associateRequest = op_pk_create(0);//120
 	op_pk_fd_set (associateRequest, 0, OPC_FIELD_TYPE_INTEGER,framecontrol,16) ;
 	op_pk_fd_set (associateRequest, 1, OPC_FIELD_TYPE_INTEGER,seq,8) ;
 	op_pk_fd_set (associateRequest, 2, OPC_FIELD_TYPE_INTEGER,pan,16) ;
 	op_pk_fd_set (associateRequest, 3, OPC_FIELD_TYPE_INTEGER,dest_addr,16) ;
-	op_pk_fd_set (associateRequest, 4, OPC_FIELD_TYPE_INTEGER,source,48) ;
 	op_pk_fd_set (associateRequest, 5, OPC_FIELD_TYPE_INTEGER,length,8) ;
 	op_pk_fd_set (associateRequest, 7, OPC_FIELD_TYPE_INTEGER,subcontrol,8) ;
-	printf("Node %d MAC create an associate frame at %f type = %d dest_addr = %d ,source = %d  \n",g_mac_node_id,op_sim_time(),type,dest_addr,source);
+	op_pk_fd_set (associateRequest, 9, OPC_FIELD_TYPE_INTEGER,g_mac_associate_flag,2) ;
+	printf("Node %d MAC create an associate frame at %f type = %d dest_addr = %d ,source = %d  seq = %d,g_mac_associate_flag = %d\n",g_mac_node_id,op_sim_time(),type,dest_addr,source,seq,g_mac_associate_flag);
 	op_prg_log_entry_write(g_mac_up_debug_log_handle, "Node %d MAC create an associate frame,dest = %d ,source = %d\n",g_mac_node_id,dest_addr,source);	
 	op_subq_pk_insert(Data_Queue,associateRequest,OPC_QPOS_TAIL);	
 	FOUT;
@@ -1104,9 +1180,50 @@ static void delete_keep_alive()
 	{
 	FIN(delete_keep_alive());
 	keepAlive.dest = 0;
-	keepAlive.seq = 0;		
+	keepAlive.seq = 0;
+	keepAlive.flag = 0;
 	FOUT;	
 	}
+
+
+
+static void check_keep_alive()
+	{
+	int retrans_num;
+	int data_num;
+	Packet* pk;
+	int seq;
+	int i;
+	FIN(check_keep_alive());
+	if(keepAlive.dest!=0)
+		{
+		data_num = op_subq_stat (Data_Queue, OPC_QSTAT_PKSIZE);
+		for(i = 0;i<data_num;i++)
+			{
+			pk = op_subq_pk_access (Data_Queue, i);
+			op_pk_fd_get(pk,1,&seq);
+			if(seq == keepAlive.seq)
+				{
+				delete_keep_alive();
+				FOUT;
+				}	
+			}
+		retrans_num = op_subq_stat (Retrans_Queue, OPC_QSTAT_PKSIZE);
+		for(i = 0;i<retrans_num;i++)
+			{
+			pk = op_subq_pk_access (Retrans_Queue, i);
+			op_pk_fd_get(pk,1,&seq);
+			if(seq == keepAlive.seq)
+				{
+				delete_keep_alive();
+				FOUT;
+				}	
+			}
+		}		
+	FOUT;	
+	}
+
+
 
 
 /*********************************************/
@@ -1177,7 +1294,7 @@ static void get_msg_to_father()
 						printf("Node %d keep alive to node %d fail!\n",g_mac_node_id,neighbor_table.node_address);
 						op_prg_log_entry_write(g_mac_up_debug_log_handle, "Node %d keep alive to node %d fail!\n",g_mac_node_id,neighbor_table.node_address);
 						op_pk_destroy(pkptr);
-						MLME_ALIVE_CONFIRM(neighbor_table.node_address,1);				
+						MLME_ALIVE_CONFIRM(neighbor_table.node_address,1,0);				
 						delete_keep_alive();					//删除保活结构体条目
 						delete_neighbor_node();					//删除父接点表条目	
 						}
@@ -1189,7 +1306,7 @@ static void get_msg_to_father()
 						op_pk_destroy(pkptr);
 						if(keepAlive.dest == neighbor_table.node_address)			//该节点已经在保活了
 							{
-							printf("Node %d keepAlive = %d\n",g_mac_node_id,keepAlive.dest);
+//							printf("Node %d keepAlive = %d\n",g_mac_node_id,keepAlive.dest);
 							g_mac_pk_type = DELEDTE_FRAME;
 							FOUT;
 							}
@@ -1245,7 +1362,7 @@ static void get_msg_to_father()
 				printf("Node %d keep alive to node %d fail!\n",g_mac_node_id,dest);
 				op_prg_log_entry_write(g_mac_up_debug_log_handle, "Node %d keep alive to node %d fail!\n",g_mac_node_id,dest);
 				op_pk_destroy(pkptr);
-				MLME_ALIVE_CONFIRM(dest,1);				
+				MLME_ALIVE_CONFIRM(dest,1,0);				
 				delete_neighbor_node();					//删除父接点表条目
 				FOUT;
 				}
@@ -1381,7 +1498,7 @@ static void send_msg()
 			op_pk_send(pkptr, OUT_MAC_PHY);
 			op_subq_pk_remove(ACK_Queue, 0);
 			update_ack_time();
-			printf("g_mac_sending_time = %f\n",g_mac_sending_time);
+//			printf("g_mac_sending_time = %f\n",g_mac_sending_time);
 			op_intrpt_schedule_self(op_sim_time()+g_mac_sending_time, Send_Completed_Code);
 			FOUT;
 			}
@@ -1573,7 +1690,7 @@ static void			create_ack(Packet* pk,int i)
 			{
 			printf("\n###Node %d:::data package from route insert into queue failed###\n", g_mac_node_id);
 			op_prg_log_entry_write(g_mac_up_debug_log_handle, "Node %d:::data package from route insert into queue failed\n", g_mac_node_id);
-			op_pk_destroy(pk);
+			op_pk_destroy(ack);
 			}
 		num_pkts = op_subq_stat (ACK_Queue, OPC_QSTAT_PKSIZE);
 		if(num_pkts<=5)
@@ -1677,7 +1794,7 @@ static int update_sequence_from_node(int source, int seq,int source_mode)
 			}
 		else
 			{
-			printf("\t\t\thuachuang == 5\n");
+			printf("\t\t\thuachuang ,seq = %d,neighbor_table.seq[0] = %d,diff = %d\n",seq,neighbor_table.seq[0],diff);
 			if(neighbor_table.seq[2]+neighbor_table.seq[3]+neighbor_table.seq[4]>=2) 
 				{
 				neighbor_table.seq[1] = 1;	
@@ -1718,12 +1835,12 @@ static void mac_frame_proc(Packet* pk)
 	type = (framecontrol>>13)&7;
 	if(type == MAC_CONTROL_FRAME)
 		{
-		printf("Node %d receive a MAC control frame!\n",g_mac_node_id);
 		op_prg_log_entry_write(g_mac_up_debug_log_handle, "Node %d receive a MAC control frame!\n",g_mac_node_id);
 		op_pk_fd_get(pk,7,&subcontrol);
 		subtype = (subcontrol>>4)&15;
 		if(subtype == KEEP_ALIVE_FRAME)
 			{
+			printf("Node %d receive a KEEP_ALIVE_FRAME!\n",g_mac_node_id);
 			neighbor_table.active_time = ACTIVE_TIME;
 			create_ack(pk,1);
 			}
@@ -1747,26 +1864,22 @@ static void ack_frame_proc1(Packet* pk)
 	int i;
 	Packet* sub_ack;
 	FIN(ack_frame_proc1(Packet* pk));
-	//if(g_mac_node_id ==1 )printf("Node %d receive an ack packet from up!!!\n",g_mac_node_id);
 	op_prg_log_entry_write(g_mac_up_debug_log_handle, "Node %d receive an ack packet from up!!!\n",g_mac_node_id);
 	op_pk_fd_get (pk, 0, &framecontrol) ;
 	op_pk_fd_get (pk, 10, &ack_num) ;
-	//printf("ack_num = %d\n",ack_num);
 	for(i = 0;i<ack_num;i++)
 		{
-//		printf("i = %d\n",i);
 		op_pk_fd_get (pk, (11+i), &sub_ack) ;
 		op_pk_fd_get (sub_ack, 0, &dest_mode) ;
 		op_pk_fd_get (sub_ack, 1, &dest) ;
 		op_pk_fd_get (sub_ack, 2, &seq) ;
 		op_pk_fd_get (sub_ack, 3, &need_seq) ;
-		//if(g_mac_node_id ==1 )printf("dest_mode %d dest %d seq %d next_hop(dest) =%d!!!\n",dest_mode,dest,seq,next_hop(dest));
 		if(keepAlive.dest!=0)
 			{
 			if(seq == keepAlive.seq)
 				{
 				//完成保活原语
-				//MLME_ALIVE_CONFIRM(source,0);
+				//MLME_ALIVE_CONFIRM(source,0,0);
 				delete_keep_alive();
 				}
 			}
@@ -1804,7 +1917,6 @@ static void ack_proc1(int dest,int seq,int need_seq )
 		op_pk_fd_get(packet,1,&ack);
 		op_pk_fd_get(packet,4,&data_source);
 		op_pk_fd_get(packet,3,&data_dest);
-		//if(g_mac_node_id ==1 )printf("packet seq =%d ,source = %d!!!\n",ack,data_source);
 		if((ack == seq)&&(data_source == dest))
 			{
 			find_ack = 1;
@@ -1824,8 +1936,6 @@ static void ack_proc1(int dest,int seq,int need_seq )
 			//op_pk_destroy(packet);
 			i--;
 			number--;
-			//printf("i = %d .number =%d\n",i,number);
-			//FOUT;
 			break;
 			}
 		}
@@ -1900,8 +2010,9 @@ static void ack_frame_proc(Packet* pk)
 		if(seq == keepAlive.seq)
 			{
 			//完成保活原语
-			//MLME_ALIVE_CONFIRM(source,0);
+			//MLME_ALIVE_CONFIRM(source,0,0);
 			delete_keep_alive();
+			
 			}
 		}	
 	if(dest_mode == SHORT_ADDRESS_MODE)
@@ -2041,6 +2152,7 @@ static int next_hop(int dest)
 		FRET(dest);
 		}
 	if(router == 0) FRET(-1);
+	if(g_mac_node_type == BACKUP_NODE) FRET(-1);
 	if(router == g_mac_short_address)
 		{
 		FRET(dest);
@@ -2080,17 +2192,28 @@ static void update_alive_time(int source)
 static void add_IES(Packet* pk)
 	{
 	int framecontrol;
+	int type;
 	FIN(add_IES(Packet* pk));
 	op_pk_fd_get(pk,0,&framecontrol);
+	type = (framecontrol>>13)&7;
 	if(MulticastContent == 0)
 		{
-		FOUT;
+		//FOUT;
 		}
 	else
 		{
-		framecontrol = framecontrol + 64;//IE oresent = 1;
+		framecontrol = framecontrol + 64;//IE present = 1;
 		op_pk_fd_set (pk, 0, OPC_FIELD_TYPE_INTEGER,framecontrol,16) ;
-		op_pk_fd_set(pk,6,OPC_FIELD_TYPE_INTEGER,MulticastContent,16);
+		op_pk_fd_set (pk, 6, OPC_FIELD_TYPE_INTEGER,MulticastContent,16);
+		op_pk_fd_set (pk, 60, OPC_FIELD_TYPE_INTEGER,0,8);
+		}
+	if(g_mac_node_type == BACKUP_NODE && g_mac_backup_seq_flag == 1 && type == ACK_FRAME)
+		{
+		g_mac_backup_seq_flag = 2;
+		framecontrol = framecontrol + 64;//IE present = 1;
+		op_pk_fd_set (pk, 0, OPC_FIELD_TYPE_INTEGER,framecontrol,16) ;
+		op_pk_fd_set (pk, 6, OPC_FIELD_TYPE_INTEGER,g_mac_backup_seq,8);
+		op_pk_fd_set (pk, 60, OPC_FIELD_TYPE_INTEGER,1,8);
 		}
 	FOUT;
 	}
@@ -2127,7 +2250,7 @@ static void	create_actice_frame(int dest,int seq)
 	op_pk_fd_set (alive, 4, OPC_FIELD_TYPE_INTEGER,source,16) ;
 	op_pk_fd_set (alive, 5, OPC_FIELD_TYPE_INTEGER,length,8) ;
 	op_pk_fd_set (alive, 7, OPC_FIELD_TYPE_INTEGER,subcontrol,8) ;
-	add_IES(alive);
+	//add_IES(alive);
 	if(keepAlive.dest != 0)//该节点已经在保活了
 		{
 		op_pk_destroy(alive);
@@ -2141,6 +2264,7 @@ static void	create_actice_frame(int dest,int seq)
 		}
 	keepAlive.dest = neighbor_table.node_address;
 	keepAlive.seq = seq;
+	keepAlive.flag = 0;
 	FOUT;
 	}
 
@@ -2279,7 +2403,6 @@ static void set_channel_start_send ()
 	FIN(set_channel_start_send());
 	op_strm_flush(IN_PHY_MAC);
 	g_mac_receiving_flag = SENDING;
-	//if(g_mac_node_id == 1) printf("start send at %f\n",op_sim_time());
 	FOUT;
 	}
 static void set_channel_start_receive ()
@@ -2289,7 +2412,6 @@ static void set_channel_start_receive ()
 	op_strm_flush(IN_PHY_MAC);
 	g_mac_receiving_flag = RECEIVING;
 	op_ima_obj_attr_get (channel_of_recvive_from_father,"min frequency",&a);
-	//if(g_mac_node_id == 1) printf("start receive at %f,receive at %f\n",op_sim_time(),a);
 	FOUT;
 	}
 
@@ -2393,7 +2515,8 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_ESN_address",	&g_mac_node_id);
 				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_type"	,	&g_mac_node_type);
 				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
-				
+				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_error_rate",	&frame_error_rate);
+				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_MAC_mode",	&CSMA_MODE);
 				
 				
 				receiver_from_father = op_id_from_name (g_mac_node_objid, OPC_OBJTYPE_RARX , "receive from father"); 
@@ -2448,11 +2571,6 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				//g_up_net_cost_stathandle	=op_stat_reg ("Traffic Sink.up_g_net_cost",		OPC_STAT_INDEX_NONE, OPC_STAT_GLOBAL);
 				
 				
-				
-				
-				
-				
-				
 				}
 				FSM_PROFILE_SECTION_OUT (state0_enter_exec)
 
@@ -2501,7 +2619,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				if (C_SELF_CHANGE_RECEIVER_CHANNEL)
 					{
 					change_band();
-					op_ima_obj_attr_get (channel_of_recvive_from_father	,"min frequency",&freq);
+					//op_ima_obj_attr_get (channel_of_recvive_from_father	,"min frequency",&freq);
 					}
 				
 				if (C_STRM_MSG_FROM_FATHER_NODE)
@@ -2515,6 +2633,10 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						//printf("Node %d receive beacon frequency is %f!!!\n",g_mac_node_id,freq);
 						//printf("Node %d receive beacon at %f!!!\n",g_mac_node_id,op_sim_time());
 						beacon_proc(pk);
+						}
+					else
+						{
+						op_pk_destroy(pk);
 						}
 					}
 				}
@@ -2561,6 +2683,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				Packet* pk;
 				int pkptr_size;
 				Packet* pk2;
+				int associateFlag;
 				
 				if((op_intrpt_type() == OPC_INTRPT_STRM) && (op_intrpt_strm() == 3))
 					{
@@ -2606,7 +2729,9 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							{
 							g_mac_rand = op_dist_uniform (1.0);
 							if(g_mac_rand<0.3)
+								{
 								send_msg();
+								}
 							}
 						else if(CSMA_MODE == 1)
 							{
@@ -2635,7 +2760,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							{
 							g_mac_current_time = op_sim_time();
 							csma_schedule_backoff ();
-							if(g_mac_current_time+g_mac_sending_time+g_mac_backoff_duration-g_mac_slot_start_time<0.48)
+							if(g_mac_current_time+g_mac_sending_time+g_mac_backoff_duration-g_mac_slot_start_time<0.498)
 								{
 								csma_backoff();
 								}
@@ -2655,16 +2780,14 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					op_pk_fd_get(pk,1,&sequence);
 					op_pk_fd_get(pk,7,&subcontrol);
 					type = (framecontrol>>13)&7;
-					printf("type = %d\t;",type);
 					subtype = (subcontrol>>4)&15;
-					printf("subtype = %d\t",subtype);
-					printf("Node %d MAC receive a packet!!!\n",g_mac_node_id);
+					//printf("Node %d MAC receive a packet!!!type = %d;;;subtype = %d\n",g_mac_node_id,type,subtype);
 					op_prg_log_entry_write(g_mac_up_debug_log_handle, "Node %d MAC receive a packet!!!,type = %d,subtype = %d,seq = %d\n",g_mac_node_id,type,subtype,sequence);
 					if(type == MAC_CONTROL_FRAME && subtype == ASSOCIATE_RESP_FRAME)
 						//关联回复帧
 						{		
 						op_pk_fd_get(pk,3,&dest);
-						if(dest == g_mac_node_id)
+						if(dest == g_mac_node_id||dest == g_mac_short_address)
 							{
 							op_pk_fd_get(pk,4,&source);
 							//printf("source = %d,associate_target = %d\n",source,g_mac_associate_target);
@@ -2676,13 +2799,23 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 								g_mac_recv_associate_response = RECV_ASSOCIATE_RESP; 	//收到目标节点关联回复帧
 								g_mac_associate_times = 0;								//重置关联次数
 								op_pk_fd_get(pk,8,&result);
+								op_pk_fd_get(pk,9,&associateFlag);
 								if(result == 2)
 									//关联成功
 									{
+									if(g_mac_node_type == BACKUP_NODE) g_mac_backup_timer = MAX_BACKUP_TIME;
 									printf("Node %d associate success\n",g_mac_node_id);
 									op_prg_log_entry_write(g_mac_up_info_log_handle, "Node %d associate success\n",g_mac_node_id);
 									op_subq_flush(Data_Queue);
-									MLME_ASSOCIATE_CONFIRM(0);
+									op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
+									if(associateFlag == 2)
+										{
+										MLME_ASSOCIATE_CONFIRM(0,2);
+										}
+									else
+										{
+										MLME_ASSOCIATE_CONFIRM(0,0);
+										}
 									for(i=0;i<FATHER_NODE_NUM;i++)
 										{
 										if(father_table.father[i].short_addr == g_mac_associate_target)
@@ -2701,7 +2834,16 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 									{
 									printf("Node %d associate failed\n",g_mac_node_id);
 									op_prg_log_entry_write(g_mac_up_info_log_handle, "Node %d associate failed\n",g_mac_node_id);
-									MLME_ASSOCIATE_CONFIRM(1);
+									op_intrpt_disable(OPC_INTRPT_SELF, Intrpt_Slot, OPC_TRUE);
+									op_intrpt_disable(OPC_INTRPT_SELF, Associate_Code, OPC_TRUE);
+									if(associateFlag == 2)
+										{
+										MLME_ASSOCIATE_CONFIRM(1,2);
+										}
+									else
+										{
+										MLME_ASSOCIATE_CONFIRM(1,0);
+										}
 									/*
 									for(i = 0;i<FATHER_NODE_NUM;i++)
 										{
@@ -2741,7 +2883,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					if(g_mac_synch_flag == NEED_SYNCH)		//同步失败，直接关联失败
 						{
 						printf("Node %d synch failed!\n",g_mac_node_id);
-						MLME_ASSOCIATE_CONFIRM(1);
+						MLME_ASSOCIATE_CONFIRM(1,0);
 						g_mac_associate_times = 0;
 						neighbor_table.node_address = 0;
 						neighbor_table.band = 0;
@@ -2761,7 +2903,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 								{						//关联失败
 								printf("Node %d associate failed,more than three times\n",g_mac_node_id);
 								op_prg_log_entry_write(g_mac_up_info_log_handle, "Node %d associate failed,more than three times\n",g_mac_node_id);
-								MLME_ASSOCIATE_CONFIRM(1);
+								MLME_ASSOCIATE_CONFIRM(1,0);
 								g_mac_associate_times = 0;
 								neighbor_table.node_address = 0;
 								neighbor_table.band = 0;
@@ -2897,7 +3039,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				FSM_CASE_TRANSIT (0, 5, state5_enter_exec, set_channel_start_receive ();, "C_SELF_NEW_SLOT", "set_channel_start_receive ()", "online", "slot_intrpt", "tr_24", "WSN_MAC_UP_NEW [online -> slot_intrpt : C_SELF_NEW_SLOT / set_channel_start_receive ()]")
 				FSM_CASE_TRANSIT (1, 4, state4_enter_exec, ;, "C_STRM_MSG_FROM_FATHER_NODE", "", "online", "msg from up", "tr_29", "WSN_MAC_UP_NEW [online -> msg from up : C_STRM_MSG_FROM_FATHER_NODE / ]")
 				FSM_CASE_TRANSIT (2, 7, state7_enter_exec, set_channel_start_send ();, "C_SELF_UP_TIME&&CSMA_MODE==0", "set_channel_start_send ()", "online", "send", "tr_56", "WSN_MAC_UP_NEW [online -> send : C_SELF_UP_TIME&&CSMA_MODE==0 / set_channel_start_send ()]")
-				FSM_CASE_TRANSIT (3, 6, state6_enter_exec, ;, "C_SLEF_LEAVE", "", "online", "waiting", "tr_74", "WSN_MAC_UP_NEW [online -> waiting : C_SLEF_LEAVE / ]")
+				FSM_CASE_TRANSIT (3, 6, state6_enter_exec, MLME_LEAVE_CONFIRM(1);, "C_SLEF_LEAVE", "MLME_LEAVE_CONFIRM(1)", "online", "waiting", "tr_74", "WSN_MAC_UP_NEW [online -> waiting : C_SLEF_LEAVE / MLME_LEAVE_CONFIRM(1)]")
 				FSM_CASE_TRANSIT (4, 9, state9_enter_exec, ;, "C_STRM_NWK_MLME&&g_mac_node_status == ONLINE", "", "online", "MLME", "tr_108", "WSN_MAC_UP_NEW [online -> MLME : C_STRM_NWK_MLME&&g_mac_node_status == ONLINE / ]")
 				FSM_CASE_TRANSIT (5, 8, state8_enter_exec, ;, "C_STRM_NWK_DATA", "", "online", "App_Msg_Up", "tr_110", "WSN_MAC_UP_NEW [online -> App_Msg_Up : C_STRM_NWK_DATA / ]")
 				FSM_CASE_TRANSIT (6, 10, state10_enter_exec, back_off_count = 0;, "BACKOFF_TIMER_EXPIRED&&CSMA_MODE==1&&slot_complete_flag==2", "back_off_count = 0", "online", "cca_back_off", "tr_125", "WSN_MAC_UP_NEW [online -> cca_back_off : BACKOFF_TIMER_EXPIRED&&CSMA_MODE==1&&slot_complete_flag==2 / back_off_count = 0]")
@@ -2924,12 +3066,20 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				int mult;
 				int flag = 0;
 				int need_ack;
+				Packet* nwk_pk;
+				int pk_length;
+				int nwk_control;
+				int nwk_head;
+				double error;
 				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
 				if(g_mac_node_status == ONLINE) op_ima_obj_attr_get (g_mac_node_objid,	"g_node_short_address",	&g_mac_short_address);
 				if(C_STRM_MSG_FROM_FATHER_NODE && g_mac_receiving_flag == RECEIVING)
+				{
+				op_intrpt_schedule_self(op_sim_time()+Protection_time, Up_Code);
+				pk = op_pk_get(IN_PHY_MAC);
+				error = op_dist_uniform (1.0);
+				if(error<=frame_error_rate)
 					{
-					op_intrpt_schedule_self(op_sim_time()+Protection_time, Up_Code);
-					pk = op_pk_get(IN_PHY_MAC);
 					op_pk_fd_get (pk, 4, &source);
 					if(source == g_mac_node_id)
 						{
@@ -2951,13 +3101,8 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						if(next_hop(dest) > 0)
 							{
 							printf("Node %d MAC reveive a packet from up node!!!\n",g_mac_node_id);	
-							printf("seq = %d\t",seq);
-							printf("source = %d\t",source);
-							printf("dest = %d\t",dest);
-							printf("ar= %d\n",AR);
-							printf("dest mode = %d\t",dest_mode);
-							printf("source_mode = %d\t",source_mode);		
-							printf("type= %d\n",type);
+							printf("seq = %d\t;source = %d\t;dest = %d\t;ar= %d\n",seq,source,dest,AR);
+							printf("dest mode = %d\t;source_mode = %d\t;type= %d\n",dest_mode,source_mode,type);
 							}
 						if(mult == 1||(dest == 65535&&type!=0)||dest ==65534||dest ==65533||dest ==65532)
 							{
@@ -2976,9 +3121,14 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							{
 							if(type == BEACON_FRAME&&g_mac_leaving != MAC_LEAVING)
 								{
-								//printf("Node %d receive a beacon at slot %d ;time = %f\n",g_mac_node_id,g_mac_slot_number,op_sim_time());	
+								//if(g_mac_node_id == 5)printf("Node %d receive a beacon at slot %d ;time = %f\n",g_mac_node_id,g_mac_slot_number,op_sim_time());	
 								//beacon frame ,
-								beacon_proc(pk);		
+								beacon_proc(pk);
+								if(g_mac_node_type == BACKUP_NODE)
+									{
+									g_mac_backup_timer = MAX_BACKUP_TIME;
+									if(g_mac_node_status == ONLINE) MLME_BACKUP_CONFIRM(0);
+									}
 								}
 							else if(type == ACK_FRAME)
 								{				
@@ -3019,6 +3169,32 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 									}
 								else
 									{
+									/*++++++++++++++++++++++++++新加+++++++++++++++++++++++++++*/
+									/*++++++++++++++++++++++++++新加+++++++++++++++++++++++++++*/
+									/*++++++++++++++++++++++++++新加+++++++++++++++++++++++++++*/
+									if(g_mac_node_type == BACKUP_NODE)
+										{
+										if(type == DATA_FRAME)
+											{
+											op_pk_fd_get (pk, 7, &nwk_control);
+											if(((nwk_control>>12)&15)==13)
+												{
+												op_pk_fd_get (pk, 8, &nwk_pk);
+												op_pk_fd_get (nwk_pk, 0, &nwk_head);
+												if(g_mac_backup_seq == nwk_head)		//正确的路由备份序列号
+													{
+													g_mac_backup_seq++;
+													g_mac_backup_seq_flag = 1;
+													}
+												pk_length = op_pk_total_size_get(nwk_pk);
+												op_pk_fd_set(pk,8,OPC_FIELD_TYPE_PACKET,nwk_pk, pk_length);
+												//op_pk_fd_set (pk, 8, &nwk_pk);
+												}
+											}
+										}
+									/*++++++++++++++++++++++++++新加+++++++++++++++++++++++++++*/
+									/*++++++++++++++++++++++++++新加+++++++++++++++++++++++++++*/
+									/*++++++++++++++++++++++++++新加+++++++++++++++++++++++++++*/
 									if(dest_mode == SHORT_ADDRESS_MODE)
 										{
 										if(type == DATA_FRAME)
@@ -3034,6 +3210,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 												create_ack(pk, 2);
 												}
 											if(need_ack == 1) op_pk_send_delayed (pk, OUT_MAC_NWK_DATA,0.5);
+											else op_pk_destroy(pk);			//uuuuuuuuuuuuuuuuuuuuuuuuuuu
 											}
 										else if(type == MAC_CONTROL_FRAME)
 											{
@@ -3044,6 +3221,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 													create_ack(pk, 1);
 												else if((source_mode == GATE_ADDRESS_MODE)&&(AR == 1))
 													create_ack(pk, 2);
+												op_pk_destroy(pk);			//uuuuuuuuuuuuuuuuuuuuuuuuuuu
 												}
 											}
 										}
@@ -3062,6 +3240,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 												create_ack(pk, 4);
 												}
 											if(need_ack == 1) op_pk_send_delayed (pk, OUT_MAC_NWK_DATA,0.5);
+											else op_pk_destroy(pk);			//uuuuuuuuuuuuuuuuuuuuuuuuuuu
 											}
 										else if(type == MAC_CONTROL_FRAME)
 											{
@@ -3072,6 +3251,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 													create_ack(pk, 3);
 												else if((source_mode == GATE_ADDRESS_MODE)&&(AR == 1))
 													create_ack(pk, 4);
+												op_pk_destroy(pk);			//uuuuuuuuuuuuuuuuuuuuuuuuuuu
 												}
 											}
 										}
@@ -3088,6 +3268,12 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							}		
 						}
 					}
+				else
+					{
+					printf("Node %d received an error packet up!!!\n",g_mac_node_id);
+					op_pk_destroy(pk);
+					}	
+				}
 				}
 				FSM_PROFILE_SECTION_OUT (state4_enter_exec)
 
@@ -3127,7 +3313,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					op_stat_write (g_up_route_cost_stathandle, 		globle_up_route_cost);	
 					
 						
-					
+					op_ima_obj_attr_get (g_mac_node_objid,	"g_node_type"	,	&g_mac_node_type);
 					op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
 					if(g_mac_node_status == ONLINE) 
 						{
@@ -3165,7 +3351,24 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						}
 					if(neighbor_table.active_time == 1)					//节点失活
 						{
-						MLME_ALIVE_CONFIRM(neighbor_table.node_address,1);
+						MLME_ALIVE_CONFIRM(neighbor_table.node_address,1,0);
+						}
+					if(g_mac_node_type == BACKUP_NODE) 
+						{
+						g_mac_backup_node = 1;
+						if(g_mac_backup_timer < 0&&g_mac_node_status == ONLINE) 
+							{
+							MLME_BACKUP_CONFIRM(1);
+							g_mac_backup_timer = MAX_BACKUP_TIME;
+							}
+						else g_mac_backup_timer--;
+						}
+					if(g_mac_slot_number == 0&&g_mac_down_slot == 1)
+						{
+						op_intrpt_schedule_remote(op_sim_time() ,Intrpt_Slot_Down ,			
+							op_id_from_name(g_mac_node_objid,OPC_OBJTYPE_QUEUE,"MAC_DOWN"));				//对下的MAC的时隙中断
+						g_mac_backup_node = 0;
+						g_mac_down_slot = 2;
 						}
 					}
 				}
@@ -3196,6 +3399,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				/************************************/
 				/************************************/
 				/************************************/
+				op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
 				if((op_intrpt_type() == OPC_INTRPT_STRM) && (op_intrpt_strm() == 3))
 					{
 					pk2 = op_pk_get(3);
@@ -3263,12 +3467,28 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						}
 					if(type == MLME_ASSOCIATE_REQUEST)							//关联请求原语
 						{
-						printf("Node %d MAC Receive a MLME_ASSOCIATE.request\n",g_mac_node_id);
+						
+						op_ima_obj_attr_get (g_mac_node_objid,	"g_node_status",	&g_mac_node_status);
+						if(g_mac_backup_node == 1)			//节点做过备份节点
+							{
+							g_mac_down_slot = 1;
+							g_mac_backup_node = 0;
+							}
+						else								//没做过备份节点
+							{
+							if(g_mac_node_status == ONLINE)
+								g_mac_down_slot = 2;
+							}
+						if(g_mac_node_id == 19) printf("g_mac_down_slot = %d\n",g_mac_down_slot);
+						
+						
 						op_prg_log_entry_write(g_mac_up_info_log_handle, "Node %d MAC Receive a MLME_ASSOCIATE.request\n",g_mac_node_id );		
 						op_pk_fd_get(pkptr,1,&g_mac_associate_target);
 						op_pk_fd_get(pkptr,2,&g_mac_associate_pan_id);
 						op_pk_fd_get(pkptr,3,&fatherBand);
 						op_pk_fd_get(pkptr,4,&frequency);
+						op_pk_fd_get(pkptr,5,&g_mac_associate_flag);
+						printf("Node %d MAC Receive a MLME_ASSOCIATE.request,g_mac_associate_flag = %d\n",g_mac_node_id,g_mac_associate_flag);
 						set_channel(fatherBand,frequency);						//设置收发信机频点
 						if(g_mac_node_type != GATE_NODE) g_mac_synch_flag = NEED_SYNCH;
 						neighbor_table.node_address = g_mac_associate_target;
@@ -3359,7 +3579,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						//if(g_mac_pk_type == DATA_FRAME||g_mac_pk_type == ACK_FRAME||g_mac_pk_type == MAC_CONTROL_FRAME)
 							{
 							pkptr_size = op_pk_total_size_get(pkptr);
-							g_mac_sending_time = 0.002+pkptr_size/g_mac_data_rate;
+							g_mac_sending_time = pkptr_size/g_mac_data_rate;
 					//		printf("g_mac_sending_time = %f\n",g_mac_sending_time);
 							send_msg();
 							}
@@ -3406,9 +3626,9 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						if(g_mac_pk_type == DATA_FRAME||g_mac_pk_type == ACK_FRAME||g_mac_pk_type == MAC_CONTROL_FRAME||g_mac_pk_type == RETRANS_FRAME)
 							{
 							pkptr_size = op_pk_total_size_get(pkptr);
-							g_mac_sending_time = 0.002+pkptr_size/g_mac_data_rate;
+							g_mac_sending_time = pkptr_size/g_mac_data_rate;
 					//		printf("Node %d g_mac_current_time =%f,g_mac_sending_time =%f,g_mac_slot_start_time =%f\n",g_mac_node_id,g_mac_current_time,g_mac_sending_time,g_mac_slot_start_time);
-							if(g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time < 0.480)
+							if(g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time < 0.498)
 								{
 								send_msg();
 								}
@@ -3484,7 +3704,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					op_pk_fd_get(pk,0,&type);
 					switch(type)
 						{
-						case 5: //组播
+						case MLME_MULTICAST_request: //组播
 							{
 							printf("Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);			
@@ -3501,7 +3721,6 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 								set_channel(band,frequency);		//设置频段频点
 								break;
 								}
-							
 							}
 						case MLME_LEAVE_REQUEST:
 							{
@@ -3511,6 +3730,13 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d up pretend to leave!\n",g_mac_node_id);				
 							g_mac_leaving = MAC_LEAVING;
 							break;
+							}
+						case MLME_BACKUP_seq:
+							{
+							if(g_mac_node_type == BACKUP_NODE)
+								{
+								op_pk_fd_get(pk,1,&g_mac_backup_seq);
+								}
 							}
 						default : break;
 						}
@@ -3566,7 +3792,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					if(pkt_num<=5)
 						{
 						seq = g_mac_sequence;
-						g_mac_sequence = (g_mac_sequence+1)%256;
+							g_mac_sequence = (g_mac_sequence+1)%256;
 						op_pk_fd_get(pk,0, &framecontrol);
 						op_pk_fd_get(pk,3, &dest);
 						op_pk_fd_get(pk,7, &nwk_head);
@@ -3613,14 +3839,13 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				Packet* pk;
 				int band;
 				int frequency;
-				int a;
 				if(C_STRM_NWK_MLME)
 					{
 					pk = op_pk_get(IN_NWK_MAC_MLME);
 					op_pk_fd_get(pk,0,&type);
 					switch(type)
 						{
-						case 5: //组播
+						case MLME_MULTICAST_request: //组播
 							{
 							printf("Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);			
@@ -3632,21 +3857,25 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							if(g_mac_node_type == BACKUP_NODE)
 								{
 								op_ima_obj_attr_get (g_mac_node_objid,	"g_node_type",	&g_mac_node_type);
-								op_pk_fd_get(pk,0,&band);
-								op_pk_fd_get(pk,1,&frequency);
+								op_pk_fd_get(pk,1,&band);
+								op_pk_fd_get(pk,2,&frequency);
 								set_channel(band,frequency);		//设置频段频点
 								break;
-								}
-							
+								}		
 							}
 						case MLME_LEAVE_REQUEST:
 							{
-							a =op_pk_id(pk);
-							printf("pk_id = %d ,time is %f \n",a,op_sim_time());
-							printf("Node %d up pretend to leave!\n",g_mac_node_id);		
+							printf("Node %d up pretend to leave!,time is %f \n",g_mac_node_id,op_sim_time());		
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d up pretend to leave!\n",g_mac_node_id);				
 							g_mac_leaving = MAC_LEAVING;
 							break;
+							}
+						case MLME_BACKUP_seq:
+							{
+							if(g_mac_node_type == BACKUP_NODE)
+								{
+								op_pk_fd_get(pk,1,&g_mac_backup_seq);
+								}
 							}
 						default : break;
 						}
@@ -3699,23 +3928,21 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					{
 					//if(g_mac_node_id == 1)printf("free Node %d g_mac_pk_type = %d,current time = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time);
 					pkptr_size = op_pk_total_size_get(pkptr);
-					g_mac_sending_time = 0.002+pkptr_size/g_mac_data_rate;
+					g_mac_sending_time = pkptr_size/g_mac_data_rate;
 					//printf("free Node %d g_mac_current_time = %f,g_mac_sending_time time = %f,g_mac_backoff_duration = %f,g_mac_slot_start_time = %f ,result = %f\n",g_mac_node_id,g_mac_current_time,g_mac_sending_time,g_mac_backoff_duration,g_mac_slot_start_time,g_mac_current_time + g_mac_sending_time + g_mac_backoff_duration - g_mac_slot_start_time);
 					csma_schedule_backoff1 ();
 					//if(g_mac_node_id == 1)printf("free Node %d g_mac_current_time = %f,g_mac_sending_time time = %f,g_mac_backoff_duration = %f,g_mac_slot_start_time = %f ,result = %f\n",g_mac_node_id,g_mac_current_time,g_mac_sending_time,g_mac_backoff_duration,g_mac_slot_start_time,g_mac_current_time + g_mac_sending_time + g_mac_backoff_duration - g_mac_slot_start_time);
-					if(g_mac_current_time + g_mac_sending_time + g_mac_backoff_duration - g_mac_slot_start_time > 0.480)
+					if(g_mac_current_time + g_mac_sending_time + g_mac_backoff_duration - g_mac_slot_start_time > 0.498)
 						{
 						//printf("Node %d g_mac_slot_start_time at %f\n",g_mac_node_id,g_mac_slot_start_time);
 						//printf("Node %d slot complete at %f\n",g_mac_node_id,g_mac_current_time);
 						back_off_count = 0;
 						slot_complete_flag = 1;
 						op_intrpt_schedule_self(op_sim_time(), Slot_Completed_Code);
-						if(g_mac_node_id == 1) printf("Node %d  back 7 ,time is %f\n",g_mac_node_id,op_sim_time());
 						}
 					else
 						{
-						
-						printf("Node %d back off channel free at %f\n",g_mac_node_id,g_mac_current_time);
+				//		printf("Node %d back off channel free at %f\n",g_mac_node_id,g_mac_current_time);
 						back_off_count = 1;
 						g_mac_backoff_exponent = macMinBE;
 						csma_backoff ();
@@ -3730,10 +3957,10 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					pkptr_size = op_pk_total_size_get(pkptr);
 					//if(g_mac_node_id == 1)printf("busy2 Node %d g_mac_pk_type = %d,current time = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time);
 				
-					g_mac_sending_time = 0.002+pkptr_size/g_mac_data_rate;
+					g_mac_sending_time = pkptr_size/g_mac_data_rate;
 					csma_schedule_backoff ();		
 					//printf("busy Node %d g_mac_current_time = %f,g_mac_sending_time time = %f,g_mac_backoff_duration = %f,g_mac_slot_start_time = %f ,result = %f\n",g_mac_node_id,g_mac_current_time,g_mac_sending_time,g_mac_backoff_duration,g_mac_slot_start_time,g_mac_current_time + g_mac_sending_time + g_mac_backoff_duration - g_mac_slot_start_time);
-					if(g_mac_current_time + g_mac_sending_time + g_mac_backoff_duration - g_mac_slot_start_time > 0.480)
+					if(g_mac_current_time + g_mac_sending_time + g_mac_backoff_duration - g_mac_slot_start_time > 0.498)
 						{ 
 						//printf("Node %d g_mac_slot_start_time at %f\n",g_mac_node_id,g_mac_slot_start_time);
 						//if(g_mac_node_id == 1)printf("Node %d slot complete at %f\n",g_mac_node_id,g_mac_current_time);
@@ -3744,7 +3971,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						}
 					else
 						{
-						printf("Node %d back off channel busy at %f\n",g_mac_node_id,g_mac_current_time);
+				//		printf("Node %d back off channel busy at %f\n",g_mac_node_id,g_mac_current_time);
 						back_off_count = 0;		
 						csma_backoff ();
 						}
@@ -3763,7 +3990,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						op_pk_fd_get(pk,3, &dest);
 						op_pk_fd_get(pk,7, &nwk_head);
 						op_pk_fd_set(pk,1,OPC_FIELD_TYPE_INTEGER,seq,8);
-						printf("\t\tseq = %d  ;;;",seq);
+						printf("Node %d MAC receive a frame from NWK dest is father node!  seq = %d  ;;;",g_mac_node_id,seq);
 						subtype = (nwk_head>>12)&15;
 						type = (framecontrol>>13)&7;
 						printf("type = %d  ;;;",type);
@@ -3794,7 +4021,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					op_pk_fd_get(pk,0,&type);
 					switch(type)
 						{
-						case 5: 
+						case MLME_MULTICAST_request: 
 							{
 							printf("Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);			
@@ -3811,7 +4038,6 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 								set_channel(band,frequency);		//设置频段频点
 								break;
 								}
-							
 							}
 						case MLME_LEAVE_REQUEST:
 							{
@@ -3819,6 +4045,13 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d up pretend to leave!\n",g_mac_node_id);				
 							g_mac_leaving = MAC_LEAVING;
 							break;
+							}
+						case MLME_BACKUP_seq:
+							{
+							if(g_mac_node_type == BACKUP_NODE)
+								{
+								op_pk_fd_get(pk,1,&g_mac_backup_seq);
+								}
 							}
 						default : break;
 						}
@@ -3864,7 +4097,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 			FSM_PROFILE_SECTION_IN ("WSN_MAC_UP_NEW [cca_back_off trans conditions]", state10_trans_conds)
 			FSM_INIT_COND (CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1&&slot_complete_flag == 2)
 			FSM_TEST_COND (BACKOFF_LIMIT_REACHED||(C_SELF_SLOT_COMPLETED&&slot_complete_flag == 1))
-			FSM_TEST_COND (!CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1)
+			FSM_TEST_COND (!CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1&&slot_complete_flag == 2)
 			FSM_DFLT_COND
 			FSM_TEST_LOGIC ("cca_back_off")
 			FSM_PROFILE_SECTION_OUT (state10_trans_conds)
@@ -3873,7 +4106,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 				{
 				FSM_CASE_TRANSIT (0, 11, state11_enter_exec, ;, "CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1&&slot_complete_flag == 2", "", "cca_back_off", "transmit", "tr_122", "WSN_MAC_UP_NEW [cca_back_off -> transmit : CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1&&slot_complete_flag == 2 / ]")
 				FSM_CASE_TRANSIT (1, 3, state3_enter_exec, csma_init ();, "BACKOFF_LIMIT_REACHED||(C_SELF_SLOT_COMPLETED&&slot_complete_flag == 1)", "csma_init ()", "cca_back_off", "online", "tr_126", "WSN_MAC_UP_NEW [cca_back_off -> online : BACKOFF_LIMIT_REACHED||(C_SELF_SLOT_COMPLETED&&slot_complete_flag == 1) / csma_init ()]")
-				FSM_CASE_TRANSIT (2, 10, state10_enter_exec, ;, "!CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1", "", "cca_back_off", "cca_back_off", "tr_127", "WSN_MAC_UP_NEW [cca_back_off -> cca_back_off : !CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1 / ]")
+				FSM_CASE_TRANSIT (2, 10, state10_enter_exec, ;, "!CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1&&slot_complete_flag == 2", "", "cca_back_off", "cca_back_off", "tr_127", "WSN_MAC_UP_NEW [cca_back_off -> cca_back_off : !CH_FREE&&!BACKOFF_LIMIT_REACHED&&back_off_count ==1&&slot_complete_flag == 2 / ]")
 				FSM_CASE_TRANSIT (3, 10, state10_enter_exec, ;, "default", "", "cca_back_off", "cca_back_off", "tr_128", "WSN_MAC_UP_NEW [cca_back_off -> cca_back_off : default / ]")
 				}
 				/*---------------------------------------------------------*/
@@ -3906,8 +4139,6 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					}
 				
 				
-				//if(g_mac_node_id == 1) printf("g_mac_num_backoffs = %d time = %f\n",g_mac_num_backoffs,op_sim_time());
-				//if(g_mac_node_id == 1) printf("Node %d  in 4 ,time is %f\n",g_mac_node_id,op_sim_time());
 				
 				g_mac_current_time = op_sim_time();
 				
@@ -3920,39 +4151,31 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						{
 						get_msg_to_father();
 						}
-					printf("1Node %d g_mac_pk_type= %d current time = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time);	
 					if(g_mac_pk_type == DATA_FRAME||g_mac_pk_type == ACK_FRAME||g_mac_pk_type == MAC_CONTROL_FRAME||g_mac_pk_type == RETRANS_FRAME)
 						{
 						printf("Node %d get a packet g_mac_pk_type = %d,current time = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time);
 						pkptr_size = op_pk_total_size_get(pkptr);
-						printf("22Node %d get a packet g_mac_pk_type = %d,current time = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time);
-						//printf("Node %d get size 11,current time = %f",g_mac_node_id,g_mac_current_time);
-				
-						g_mac_sending_time = 0.002+pkptr_size/g_mac_data_rate;
-						//printf("g_mac_sending_time = %f\n",g_mac_sending_time);
-						if(g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time < 0.480)
+						g_mac_sending_time = pkptr_size/g_mac_data_rate;
+						if(g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time < 0.498)
 							{
-							printf("Node %d send a packet g_mac_pk_type = %d,current time = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time);
+							if(g_mac_node_id == 5) printf("1Node %d get a packet g_mac_pk_type = %d,current time = %f,g_mac_sending_time = %f,g_mac_slot_start_time = %f,result = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time,g_mac_sending_time,g_mac_slot_start_time,g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time);
 							send_msg();
 							//op_intrpt_schedule_self(op_sim_time()+0.04, 666);
 							g_mac_backoff_exponent = macMinBE;
 							}
 						else
 							{
-							//if(g_mac_node_id == 1) printf("Node %d  back 1 ,time is %f\n",g_mac_node_id,op_sim_time());
 							op_intrpt_schedule_self(op_sim_time(), Slot_Completed_Code);
 							}
 						}
 					else
 						{
-						printf("Node %d  back 2 ,time is %f\n",g_mac_node_id,op_sim_time());
 						op_intrpt_schedule_self(op_sim_time(), Slot_Completed_Code);
 						}
 					}
 				
 				if(C_SELF_SEND_COMPLETED&&!CH_FREE)
 					{
-					//if(g_mac_node_id == 1) printf("Node %d  back 9 ,time is %f\n",g_mac_node_id,op_sim_time());
 					op_intrpt_schedule_self(op_sim_time(), Slot_Completed_Code);
 					}
 				
@@ -3969,24 +4192,20 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					if(g_mac_pk_type == DATA_FRAME||g_mac_pk_type == ACK_FRAME||g_mac_pk_type == MAC_CONTROL_FRAME||g_mac_pk_type == RETRANS_FRAME)
 						{
 						pkptr_size = op_pk_total_size_get(pkptr);
-						g_mac_sending_time = 0.002+pkptr_size/g_mac_data_rate;
-						//printf("g_mac_sending_time = %f\n",g_mac_sending_time);
-						if(g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time < 0.48)
+						g_mac_sending_time = pkptr_size/g_mac_data_rate;
+						if(g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time < 0.498)
 							{
-							printf("333Node %d send a packet g_mac_pk_type = %d,g_mac_sending_time = %f,current time = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_sending_time,g_mac_current_time);
+							if(g_mac_node_id == 5) printf("2Node %d get a packet g_mac_pk_type = %d,current time = %f,g_mac_sending_time = %f,g_mac_slot_start_time = %f,result = %f\n",g_mac_node_id,g_mac_pk_type,g_mac_current_time,g_mac_sending_time,g_mac_slot_start_time,g_mac_current_time+g_mac_sending_time-g_mac_slot_start_time);
 							send_msg();
-							//op_intrpt_schedule_self(op_sim_time()+0.04, 666);
 							g_mac_backoff_exponent = macMinBE;
 							}
 						else
 							{
-							//if(g_mac_node_id == 1) printf("Node %d  back 4 ,time is %f\n",g_mac_node_id,op_sim_time());
 							op_intrpt_schedule_self(op_sim_time(), Slot_Completed_Code);
 							}
 						}
 					else
 						{
-						//if(g_mac_node_id == 1) printf("Node %d  back 5 ,time is %f\n",g_mac_node_id,op_sim_time());
 						op_intrpt_schedule_self(op_sim_time(), Slot_Completed_Code);
 						}
 					}
@@ -4009,7 +4228,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 						op_pk_fd_get(pk,3, &dest);
 						op_pk_fd_get(pk,7, &nwk_head);
 						op_pk_fd_set(pk,1,OPC_FIELD_TYPE_INTEGER,seq,8);
-						printf("\t\tseq = %d  ;;;",seq);
+						printf("Node %d MAC receive a frame from NWK dest is father node!  seq = %d  ;;;",g_mac_node_id,seq);
 						subtype = (nwk_head>>12)&15;
 						type = (framecontrol>>13)&7;
 						printf("type = %d  ;;;",type);
@@ -4040,7 +4259,7 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 					op_pk_fd_get(pk,0,&type);
 					switch(type)
 						{
-						case 5: 
+						case MLME_MULTICAST_request: 
 							{
 							printf("Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d receive a MLME_MULTICAST.request!\n",g_mac_node_id);			
@@ -4057,7 +4276,6 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 								set_channel(band,frequency);		//设置频段频点
 								break;
 								}
-							
 							}
 						case MLME_LEAVE_REQUEST:
 							{
@@ -4065,6 +4283,13 @@ WSN_MAC_UP_NEW (OP_SIM_CONTEXT_ARG_OPT)
 							op_prg_log_entry_write(g_mac_up_info_log_handle,"Node %d up pretend to leave!\n",g_mac_node_id);				
 							g_mac_leaving = MAC_LEAVING;
 							break;
+							}
+						case MLME_BACKUP_seq:
+							{
+							if(g_mac_node_type == BACKUP_NODE)
+								{
+								op_pk_fd_get(pk,1,&g_mac_backup_seq);
+								}
 							}
 						default : break;
 						}
@@ -4232,6 +4457,14 @@ _op_WSN_MAC_UP_NEW_terminate (OP_SIM_CONTEXT_ARG_OPT)
 #undef retrans_flag
 #undef back_off_count
 #undef slot_complete_flag
+#undef CSMA_MODE
+#undef frame_error_rate
+#undef g_mac_backup_seq
+#undef g_mac_backup_seq_flag
+#undef g_mac_associate_flag
+#undef g_mac_backup_timer
+#undef g_mac_backup_node
+#undef g_mac_down_slot
 
 #undef FIN_PREAMBLE_DEC
 #undef FIN_PREAMBLE_CODE
@@ -4751,6 +4984,46 @@ _op_WSN_MAC_UP_NEW_svar (void * gen_ptr, const char * var_name, void ** var_p_pt
 	if (strcmp ("slot_complete_flag" , var_name) == 0)
 		{
 		*var_p_ptr = (void *) (&prs_ptr->slot_complete_flag);
+		FOUT
+		}
+	if (strcmp ("CSMA_MODE" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->CSMA_MODE);
+		FOUT
+		}
+	if (strcmp ("frame_error_rate" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->frame_error_rate);
+		FOUT
+		}
+	if (strcmp ("g_mac_backup_seq" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_mac_backup_seq);
+		FOUT
+		}
+	if (strcmp ("g_mac_backup_seq_flag" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_mac_backup_seq_flag);
+		FOUT
+		}
+	if (strcmp ("g_mac_associate_flag" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_mac_associate_flag);
+		FOUT
+		}
+	if (strcmp ("g_mac_backup_timer" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_mac_backup_timer);
+		FOUT
+		}
+	if (strcmp ("g_mac_backup_node" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_mac_backup_node);
+		FOUT
+		}
+	if (strcmp ("g_mac_down_slot" , var_name) == 0)
+		{
+		*var_p_ptr = (void *) (&prs_ptr->g_mac_down_slot);
 		FOUT
 		}
 	*var_p_ptr = (void *)OPC_NIL;

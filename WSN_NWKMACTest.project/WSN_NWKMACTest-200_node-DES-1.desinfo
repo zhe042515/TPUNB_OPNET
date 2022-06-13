@@ -1,5 +1,4 @@
-200_node	1	1
-Campus Network.*.g_node_data_mode:	1.0
+200_node	1	0
 ----------------- Static Environment Attribute Confirmations -----------------
 
 --------------------Name-------------------- --Source--- ------Value------
@@ -16,6 +15,7 @@ mem_opt.grow_pool_planks                     default     TRUE
 mem_optimize                                 default     TRUE
 mem_shred                                    default     FALSE
 mod_dirs                                     env. file   C:\Users\51133\op_models\WSN_NWKMACTest.project,
+                                                         C:\Users\51133\Desktop\,
                                                          C:\Users\51133\op_models,
                                                          D:\OPNET\14.5.A\sys\lib,
                                                          D:\OPNET\14.5.A\sys\icons,
@@ -277,7 +277,7 @@ comp_prog                                    default     comp_msvc
 comp_prog_cpp                                default     comp_msvc
 comp_trace_info                              env. file   kernel-based
 cosim                                        default     <null>
-debug                                        default     FALSE
+debug                                        cmd line    TRUE
 debug_mk                                     default     FALSE
 default_site_position_cache_time_granularity env. file   0
 diag_enable                                  default     FALSE
@@ -382,10 +382,9 @@ raw_err                                      default     FALSE
 realtime_ratio                               env. file   0
 rec_err_suppress                             default     FALSE
 record_gstats                                default     FALSE
-record_initial_attribute_values_as_scalar    env. file   "Campus Network.*.g_node_data_mode"
-script_mode                                  default     none
+script_mode                                  env. file   none
 script_name                                  default     odb_script
-seed                                         env. file   13
+seed                                         env. file   100
 sim_packet_sharing                           env. file   conservative
 sim_process_priority                         default     normal
 sim_time_quantum                             env. file   0

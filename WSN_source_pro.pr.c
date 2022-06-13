@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_source_pro_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62738F1A 62738F1A 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_source_pro_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 628B4F5B 628B4F5B 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -18,7 +18,7 @@ const char WSN_source_pro_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62738F1
 
 #define		Poisson 			g_data_mode==1
 #define		Discrete 			g_data_mode==2
-#define		Concentrat			g_data_mode!=1&&g_data_mode!=2
+#define		Concentrat			g_data_mode==3
 
 
 #define		DATA_LEN			10
@@ -235,6 +235,7 @@ WSN_source_pro (OP_SIM_CONTEXT_ARG_OPT)
 			FSM_PROFILE_SECTION_IN ("WSN_source_pro [init trans conditions]", state0_trans_conds)
 			FSM_INIT_COND (Discrete)
 			FSM_TEST_COND (Poisson)
+			FSM_TEST_COND (Concentrat)
 			FSM_DFLT_COND
 			FSM_TEST_LOGIC ("init")
 			FSM_PROFILE_SECTION_OUT (state0_trans_conds)
@@ -243,7 +244,8 @@ WSN_source_pro (OP_SIM_CONTEXT_ARG_OPT)
 				{
 				FSM_CASE_TRANSIT (0, 5, state5_enter_exec, delay_start();, "Discrete", "delay_start()", "init", "delay_discrete", "tr_26", "WSN_source_pro [init -> delay_discrete : Discrete / delay_start()]")
 				FSM_CASE_TRANSIT (1, 1, state1_enter_exec, send_intrpt();, "Poisson", "send_intrpt()", "init", "make_poison", "tr_25", "WSN_source_pro [init -> make_poison : Poisson / send_intrpt()]")
-				FSM_CASE_TRANSIT (2, 6, state6_enter_exec, send_intrpt();, "default", "send_intrpt()", "init", "make_concentrat", "tr_27", "WSN_source_pro [init -> make_concentrat : default / send_intrpt()]")
+				FSM_CASE_TRANSIT (2, 6, state6_enter_exec, send_intrpt();, "Concentrat", "send_intrpt()", "init", "make_concentrat", "tr_27", "WSN_source_pro [init -> make_concentrat : Concentrat / send_intrpt()]")
+				FSM_CASE_TRANSIT (3, 8, state8_enter_exec, ;, "default", "", "init", "nothing", "tr_34", "WSN_source_pro [init -> nothing : default / ]")
 				}
 				/*---------------------------------------------------------*/
 
@@ -442,6 +444,23 @@ WSN_source_pro (OP_SIM_CONTEXT_ARG_OPT)
 
 			/** state (data_concentrat) transition processing **/
 			FSM_TRANSIT_FORCE (6, state6_enter_exec, ;, "default", "", "data_concentrat", "make_concentrat", "tr_15", "WSN_source_pro [data_concentrat -> make_concentrat : default / ]")
+				/*---------------------------------------------------------*/
+
+
+
+			/** state (nothing) enter executives **/
+			FSM_STATE_ENTER_UNFORCED (8, "nothing", state8_enter_exec, "WSN_source_pro [nothing enter execs]")
+
+			/** blocking after enter executives of unforced state. **/
+			FSM_EXIT (17,"WSN_source_pro")
+
+
+			/** state (nothing) exit executives **/
+			FSM_STATE_EXIT_UNFORCED (8, "nothing", "WSN_source_pro [nothing exit execs]")
+
+
+			/** state (nothing) transition processing **/
+			FSM_TRANSIT_FORCE (8, state8_enter_exec, ;, "default", "", "nothing", "nothing", "tr_35", "WSN_source_pro [nothing -> nothing : default / ]")
 				/*---------------------------------------------------------*/
 
 

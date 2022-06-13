@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char MAC_interface_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624E4D51 624E4D51 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char MAC_interface_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62A6A919 62A6A919 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -42,6 +42,7 @@ const char MAC_interface_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 624E4D51
 #define Multicast					5
 #define Leave						7
 #define Syn_Seq_Set					8
+#define BeaconConfirm				9
 
 
 /*------------------ Input Index ------------------*/
@@ -293,41 +294,51 @@ MAC_interface (OP_SIM_CONTEXT_ARG_OPT)
 				pk = op_pk_get (op_intrpt_strm());
 				op_pk_fd_get(pk,0,&type);
 				//产生MAC命令帧
-				
+				//printf("node %d IO recv a mlme from nwk, type = %d\n",my_node_id, type);	
 				switch(type)
 					{
 					case Scan: op_pk_send(pk, MLME_PHY_UP);
-							printf("NWK_MLME received a Scan type command, type = %d\n", type);
+							printf("Node %d NWK_MLME received a Scan type command, type = %d\n", my_node_id, type);
 							break;
-					case Associate:op_pk_send(pk, MLME_PHY_UP);
-							printf("NWK_MLME received a Associate type command, type = %d\n", type);
+					case Associate:
+							op_pk_fd_get(pk,5,&type);
+							if(type != 1) op_pk_send(pk, MLME_PHY_UP);
+							else op_pk_send(pk, MLME_PHY_DOWN);
+							printf("Node %d NWK_MLME received a Associate type command, type = %d\n", my_node_id, type);
 							break;
 					case ChildSEt:op_pk_send(pk, MLME_PHY_DOWN);
-							printf("NWK_MLME received a ChildSEt type command, type = %d\n", type);
+							printf("Node %d NWK_MLME received a ChildSEt type command, type = %d\n", my_node_id, type);
 							break;
 					case Multicast:op_pk_send(pk, MLME_PHY_UP);
-							printf("NWK_MLME received a Multicast type command, type = %d\n", type);
+							printf("Node %d NWK_MLME received a Multicast type command, type = %d\n", my_node_id, type);
 							break;
-					case Alive:op_pk_send(pk, MLME_PHY_UP);//主动对父节点进行保活
-							printf("NWK_MLME received a Alive type command, type = %d\n", type);
+					case Alive:op_pk_fd_get(pk,2,&type);
+							if(type == 1) op_pk_send(pk, MLME_PHY_DOWN);
+							else op_pk_send(pk, MLME_PHY_UP);//主动对父节点进行保活
+							printf("Node %d NWK_MLME received a Alive type command, type = %d\n", my_node_id, type);
 							break;
-					case Leave:pk2 = op_pk_copy(pk);
-					/*
-							if(my_node_type == 0)
+					case Leave:op_pk_fd_get(pk,1,&type);
+							if(type == 0)
 								{
-								op_pk_send(op_pk_copy(pk), MLME_PHY_DOWN_1);
-								op_pk_send(op_pk_copy(pk), MLME_PHY_DOWN_2);
-								op_pk_send(op_pk_copy(pk), MLME_PHY_DOWN_3);
+								pk2 = op_pk_copy(pk);
+								op_pk_send(pk, MLME_PHY_DOWN);
+								op_pk_send(pk2, MLME_PHY_UP);
 								}
-					*/
-							op_pk_send(pk, MLME_PHY_DOWN);
-							op_pk_send(pk2, MLME_PHY_UP);
-							printf("NWK_MLME received a Leave type command, type = %d\n", type);
+							else
+								{
+								op_pk_send(pk, MLME_PHY_UP);
+								pk2 = op_pk_create(0);
+								op_pk_fd_set (pk2, 0, OPC_FIELD_TYPE_INTEGER, Leave, 8);
+								op_pk_fd_set (pk2, 1, OPC_FIELD_TYPE_INTEGER, 2, 8);
+								op_pk_send(pk2,Port_NWK_MLME_out);
+								}
+							
+							printf("Node %d NWK_MLME received a Leave type command, type = %d\n", my_node_id, type);
 							break;
 					case Syn_Seq_Set:op_pk_send(pk, MLME_PHY_UP);
-							printf("NWK_MLME Leave a Syn_Seq_Set type command, type = %d\n", type);
+							printf("Node %d NWK_MLME Leave a Syn_Seq_Set type command, type = %d\n", my_node_id, type);
 							break;
-					default:printf("NWK_MLME received a error type command, type = %d\n", type);
+					default:printf("Node %d NWK_MLME received a error type command, type = %d\n", my_node_id, type);
 							op_pk_destroy(pk);
 					}
 				
@@ -359,10 +370,19 @@ MAC_interface (OP_SIM_CONTEXT_ARG_OPT)
 					printf("Node %d interface receive a MLME from down\n", my_node_id);
 					switch(type)
 						{
+						case 1:	//	关联确认原语
+							{
+							op_pk_fd_get(pk,2,&result);
+							printf("Node %d receive a associate confirm at %f,result is %d\n",my_node_id,op_sim_time(),result);
+							op_pk_send(pk,Port_NWK_MLME_out);
+							break;
+							}
 						case Alive:op_pk_send(pk,Port_NWK_MLME_out);break;
 						case Conflict:op_pk_send(pk,Port_NWK_MLME_out);break;
-						case Leave:op_pk_send(pk,Port_NWK_MLME_out);printf("Node %d io mlme leave\n", my_node_id);break;
+						case Leave:op_pk_send(pk,Port_NWK_MLME_out);printf("Node %d down io mlme leave\n", my_node_id);break;
 						case Multicast:op_pk_send(pk,Port_NWK_MLME_out);break;
+						case Syn_Seq_Set:op_pk_send(pk,Port_NWK_MLME_out);break;
+						case BeaconConfirm:op_pk_send(pk,Port_NWK_MLME_out);break;
 						default:
 							{
 							op_pk_destroy(pk);
@@ -374,7 +394,7 @@ MAC_interface (OP_SIM_CONTEXT_ARG_OPT)
 					{
 					pk = op_pk_get(op_intrpt_strm());
 					op_pk_fd_get(pk,0,&type);	
-					printf("receive a MLME from up\n");
+					//printf("receive a MLME from up\n");
 					switch(type)
 						{
 						case 0:	//	扫描确认原语
@@ -392,10 +412,11 @@ MAC_interface (OP_SIM_CONTEXT_ARG_OPT)
 							op_pk_send(pk,Port_NWK_MLME_out);
 							break;
 							}
-						case Alive:op_pk_send(pk,Port_NWK_MLME_out);break;
+						case Alive:printf("Node %d recv a alive\n", my_node_id);op_pk_send(pk,Port_NWK_MLME_out);break;
 						case Conflict:op_pk_send(pk,Port_NWK_MLME_out);break;
 						case Multicast:op_pk_send(pk,Port_NWK_MLME_out);break;
-						case Leave:op_pk_send(pk,Port_NWK_MLME_out);printf("Node %d io mlme leave\n", my_node_id);break;
+						case Leave:op_pk_send(pk,Port_NWK_MLME_out);printf("Node %d up io mlme leave\n", my_node_id);break;
+						case BeaconConfirm:op_pk_send(pk,Port_NWK_MLME_out);break;
 						default:
 							{
 							op_pk_destroy(pk);
@@ -423,15 +444,17 @@ MAC_interface (OP_SIM_CONTEXT_ARG_OPT)
 				Packet* pk;
 				if(op_intrpt_strm() == PHY_MAC0 || op_intrpt_strm() == PHY_MAC_down_1 || op_intrpt_strm() == PHY_MAC_down_2 ||op_intrpt_strm() == PHY_MAC_down_3)
 					{
+					//printf("node %d interface receive a msg from down\n",my_node_id);
 					pk = op_pk_get(op_intrpt_strm());
 					op_pk_send(pk,Port_NWK_MCPS_down_out);
-					printf("node %d interface receive a msg from down\n",my_node_id);
+					
 					}
 				else
 					{
+					//printf("node %d interface receive a msg from up\n",my_node_id);	
 					pk = op_pk_get(op_intrpt_strm());
 					op_pk_send(pk,Port_NWK_MCPS_up_out);
-					printf("node %d interface receive a msg from up\n",my_node_id);	
+					
 					}
 				}
 				FSM_PROFILE_SECTION_OUT (state5_enter_exec)

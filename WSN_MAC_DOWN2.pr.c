@@ -4,7 +4,7 @@
 
 
 /* This variable carries the header into the object file */
-const char WSN_MAC_DOWN2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 62748973 62748973 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
+const char WSN_MAC_DOWN2_pr_c [] = "MIL_3_Tfile_Hdr_ 145A 30A modeler 7 6283B36C 6283B36C 1 DESKTOP-RD4S7T2 51133 0 0 none none 0 0 none 0 0 0 0 0 0 0 0 1bcc 1                                                                                                                                                                                                                                                                                                                                                                                                    ";
 #include <string.h>
 
 
@@ -549,7 +549,6 @@ static void mac_init()
 		g_mac_node_status = ONLINE;									//网关节点直接在网
 		g_mac_node_depth = 0;
 		}
-	
 	if(g_mac_node_type != GATE_NODE)
 		{
 		g_mac_synch_flag = NEED_SYNCH;								//非网关节点

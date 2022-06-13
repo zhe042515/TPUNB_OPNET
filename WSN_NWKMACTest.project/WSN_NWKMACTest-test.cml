@@ -26,6 +26,7 @@ ppp_wkstn
 Profile Config
 QoS Attribute Config
 Task Config
+WSN_gata
 WSN_slot_aloha
 link models:
 1000BaseX
